@@ -105,7 +105,7 @@ def get_annotation(data, whole_path):
     annotation = []
 
     for key, value in data['database'].items():
-        if key.split('^')[0] == whole_path:
+        if os.path.normpath(key.split('^')[0]) == os.path.normpath(whole_path):
             annotation.append(value['annotations'])
 
     return  annotation

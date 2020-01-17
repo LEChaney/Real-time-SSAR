@@ -39,6 +39,7 @@ def create_trainlist( subset ,file_name, class_types = 'all'):
 	print("Preparing Lines")
 	new_lines = []
 	for path in paths:
+		path = os.path.normpath(path)
 		df = pd.read_csv(path,index_col = False, header = None)
 		x = path.rsplit(os.sep,4)
 		subject = x[2]

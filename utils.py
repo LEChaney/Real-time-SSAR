@@ -140,7 +140,7 @@ def calculate_precision(outputs, targets):
 
     _, pred = outputs.topk(1, 1, True)
     pred = pred.t()
-    return  precision_score(targets.view(-1), pred.view(-1), average = 'macro')
+    return  precision_score(targets.cpu().view(-1), pred.cpu().view(-1), average = 'macro')
 
 
 def calculate_recall(outputs, targets):
@@ -148,4 +148,4 @@ def calculate_recall(outputs, targets):
 
     _, pred = outputs.topk(1, 1, True)
     pred = pred.t()
-    return  recall_score(targets.view(-1), pred.view(-1), average = 'macro')
+    return  recall_score(targets.cpu().view(-1), pred.cpu().view(-1), average = 'macro')

@@ -109,7 +109,7 @@ def get_video_names_and_annotations(data, subset):
 
     for key, value in data['database'].items():
         this_subset = value['subset']
-        if this_subset == subset:
+        if os.path.normpath(this_subset) == os.path.normpath(subset):
             label = value['annotations']['label']
             #video_names.append('{}/{}'.format(label, key))
             video_names.append(key.split('^')[0])

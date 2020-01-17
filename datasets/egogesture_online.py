@@ -46,7 +46,8 @@ def get_default_image_loader():
 
 
 def video_loader(video_dir_path, frame_indices, modality, sample_duration, image_loader):
-    
+    video_dir_path = os.path.normpath(video_dir_path)
+
     video = []
     if modality == 'RGB':
         for i in frame_indices:
@@ -107,7 +108,7 @@ def get_annotation(data, whole_path):
     annotation = []
 
     for key, value in data['database'].items():
-        if key.split('_')[0] == whole_path:
+        if os.path.normpath(key.split('_')[0]) == os.path.normpath(whole_path):
             annotation.append(value['annotations'])
 
     return  annotation
@@ -124,7 +125,7 @@ def make_dataset( annotation_path, video_path , whole_path,sample_duration, n_sa
         idx_to_class[label] = name
 
     dataset = []
-    print("[INFO]: Videot  is loading...")
+    print("[INFO]: Video  is loading...")
     import glob
 
     n_frames = len(glob.glob(whole_video_path + '/*.jpg'))

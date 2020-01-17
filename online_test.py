@@ -33,9 +33,6 @@ from matplotlib.pyplot import figure
 def weighting_func(x):
     return (1 / (1 + np.exp(-0.2*(x-9))))
 
-
-opt = parse_opts_online()
-
 def load_models(opt):
     opt.resume_path = opt.resume_path_det
     opt.pretrain_path = opt.pretrain_path_det
@@ -87,6 +84,8 @@ def load_models(opt):
                                p.requires_grad)
     print("Total number of trainable parameters: ", pytorch_total_params)
 
+    # Reset parsed args
+    opt = parse_opts_online()
 
     opt.resume_path = opt.resume_path_clf
     opt.pretrain_path = opt.pretrain_path_clf
@@ -134,244 +133,255 @@ def load_models(opt):
 
     return detector, classifier
 
-detector,classifier = load_models(opt)
+def main():
+    opt = parse_opts_online()
 
-if opt.no_mean_norm and not opt.std_norm:
-    norm_method = Normalize([0, 0, 0], [1, 1, 1])
-elif not opt.std_norm:
-    norm_method = Normalize(opt.mean, [1, 1, 1])
-else:
-    norm_method = Normalize(opt.mean, opt.std)
+    detector,classifier = load_models(opt)
 
-
-spatial_transform = Compose([
-    Scale(112),
-    CenterCrop(112),
-    ToTensor(opt.norm_value), norm_method
-    ])
-
-target_transform = ClassLabel()
-
-
-
-
-## Get list of videos to test
-if opt.dataset == 'egogesture':
-    subject_list = ['Subject{:02d}'.format(i) for i in [2, 9, 11, 14, 18, 19, 28, 31, 41, 47]]
-    test_paths = []
-    for subject in subject_list:
-        for x in glob.glob(os.path.join(opt.video_path,subject,'*/*/rgb*')):
-            test_paths.append(x)
-elif opt.dataset == 'nv':
-    df = pd.read_csv(os.path.join(opt.video_path,'nvgesture_test_correct_cvpr2016_v2.lst'), delimiter = ' ', header = None)
-    test_paths = []
-    for x in df[0].values:
-        test_paths.append(os.path.join(opt.video_path, x.replace('path:', ''), 'sk_color_all'))
-
-
-
-print('Start Evaluation')
-detector.eval()
-classifier.eval()
-
-levenshtein_accuracies = AverageMeter()
-videoidx = 0
-for path in test_paths[4:]:
-    if opt.dataset == 'egogesture':
-        opt.whole_path = path.split(os.sep, 4)[-1]
-    elif opt.dataset == 'nv':
-        opt.whole_path = path.split(os.sep, 3)[-1]
-    
-    videoidx += 1
-    active_index = 0
-    passive_count = 0
-    active = False
-    prev_active = False
-    finished_prediction = None
-    pre_predict = False
-
-    cum_sum = np.zeros(opt.n_classes_clf,)
-    clf_selected_queue = np.zeros(opt.n_classes_clf,)
-    det_selected_queue = np.zeros(opt.n_classes_det,)
-    myqueue_det = Queue(opt.det_queue_size ,  n_classes = opt.n_classes_det)
-    myqueue_clf = Queue(opt.clf_queue_size, n_classes = opt.n_classes_clf )
-
-
-    print('[{}/{}]============'.format(videoidx,len(test_paths)))
-    print(path)
-    opt.sample_duration = max(opt.sample_duration_clf, opt.sample_duration_det)
-    test_data = get_online_data(
-        opt, spatial_transform, None, target_transform)
-
-    test_loader = torch.utils.data.DataLoader(
-                test_data,
-                batch_size=opt.batch_size,
-                shuffle=False,
-                num_workers=opt.n_threads,
-                pin_memory=True)
-
-
-    results = []
-    prev_best1 = opt.n_classes_clf
-
-    for i, (inputs, targets) in enumerate(test_loader):
-        if not opt.no_cuda:
-            targets = targets.cuda(async=True)
-        ground_truth_array = np.zeros(opt.n_classes_clf +1,)
-        with torch.no_grad():
-            inputs = Variable(inputs)
-            targets = Variable(targets)
-            if opt.modality_det == 'RGB':
-                inputs_det = inputs[:,:-1,-opt.sample_duration_det:,:,:]
-            elif opt.modality_det == 'Depth':
-                inputs_det = inputs[:,-1,-opt.sample_duration_det:,:,:].unsqueeze(1)
-            elif opt.modality_det =='RGB-D':
-                inputs_det = inputs[:,:,-opt.sample_duration_det:,:,:]
-            
-            outputs_det = detector(inputs_det)
-            outputs_det = F.softmax(outputs_det,dim=1)
-            outputs_det = outputs_det.cpu().numpy()[0].reshape(-1,)
-
-            # enqueue the probabilities to the detector queue
-            myqueue_det.enqueue(outputs_det.tolist())
-
-            if opt.det_strategy == 'raw':
-                det_selected_queue = outputs_det
-            elif opt.det_strategy == 'median':
-                det_selected_queue = myqueue_det.median
-            elif opt.det_strategy == 'ma':
-                det_selected_queue = myqueue_det.ma
-            elif opt.det_strategy == 'ewma':
-                det_selected_queue = myqueue_det.ewma
-            
-
-            prediction_det = np.argmax(det_selected_queue)
-            prob_det = det_selected_queue[prediction_det]
-            
-            #### State of the detector is checked here as detector act as a switch for the classifier
-            if  prediction_det == 1:
-                if opt.modality_clf == 'RGB':
-                    inputs_clf = inputs[:,:-1,:,:,:]
-                elif opt.modality_clf == 'Depth':
-                    inputs_clf = inputs[:,-1,:,:,:].unsqueeze(1)
-                elif opt.modality_clf =='RGB-D':
-                    inputs_clf = inputs[:,:,:,:,:]
-
-                outputs_clf = classifier(inputs_clf)
-                outputs_clf = F.softmax(outputs_clf,dim=1)
-                outputs_clf = outputs_clf.cpu().numpy()[0].reshape(-1,)
-                
-                # Push the probabilities to queue
-                myqueue_clf.enqueue(outputs_clf.tolist())
-                passive_count = 0
-
-                if opt.clf_strategy == 'raw':
-                    clf_selected_queue = outputs_clf
-                elif opt.clf_strategy == 'median':
-                    clf_selected_queue = myqueue_clf.median
-                elif opt.clf_strategy == 'ma':
-                    clf_selected_queue = myqueue_clf.ma
-                elif opt.clf_strategy == 'ewma':
-                    clf_selected_queue = myqueue_clf.ewma
-
-            else:
-                outputs_clf = np.zeros(opt.n_classes_clf ,)
-                # Push the probabilities to queue
-                myqueue_clf.enqueue(outputs_clf.tolist())
-                passive_count += 1
-        
-
-
-        if passive_count >= opt.det_counter:
-            active = False
-        else:
-            active = True
-
-        # one of the following line need to be commented !!!!
-        if active:
-            active_index += 1
-            cum_sum = ((cum_sum * (active_index-1)) + (weighting_func(active_index) * clf_selected_queue))/active_index # Weighted Aproach
-            # cum_sum = ((cum_sum * (x-1)) + (1.0 * clf_selected_queue))/x #Not Weighting Aproach 
-
-            best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
-            if float(cum_sum[best1]- cum_sum[best2]) > opt.clf_threshold_pre:
-                finished_prediction = True
-                pre_predict = True
-            
-        else:
-            active_index = 0
-
-
-        if active == False and  prev_active == True:
-            finished_prediction = True
-        elif active == True and  prev_active == False:
-            finished_prediction = False
-
-
-
-        if finished_prediction == True:
-            best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
-            if cum_sum[best1]>opt.clf_threshold_final:
-                if pre_predict == True:  
-                    if best1 != prev_best1:
-                        if cum_sum[best1]>opt.clf_threshold_final:  
-                            results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
-                            print( 'Early Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))                      
-                else:
-                    if cum_sum[best1]>opt.clf_threshold_final:
-                        if best1 == prev_best1:
-                            if cum_sum[best1]>5:
-                                results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
-                                print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
-                        else:
-                            results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
-                            
-                            print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
-
-                finished_prediction = False
-                prev_best1 = best1
-
-            cum_sum = np.zeros(opt.n_classes_clf,)
-
-        if active == False and  prev_active == True:
-            pre_predict = False
-    
-        prev_active = active
-
-    if opt.dataset == 'egogesture':
-        target_csv_path = os.path.join(opt.video_path.rsplit(os.sep, 1)[0], 
-                                'labels-final-revised1',
-                                opt.whole_path.rsplit(os.sep,2)[0],
-                                'Group'+opt.whole_path[-1] + '.csv').replace('Subject', 'subject')
-        true_classes = []
-        with open(target_csv_path) as csvfile:
-            readCSV = csv.reader(csvfile, delimiter=',')
-            for row in readCSV:
-                true_classes.append(int(row[0])-1)
-    elif opt.dataset == 'nv':
-        true_classes = []
-        with open('./annotation_nvGesture/vallistall.txt') as csvfile:
-            readCSV = csv.reader(csvfile, delimiter=' ')
-            for row in readCSV:
-                if row[0] == opt.whole_path:
-                    if row[1] != '26' :
-                        true_classes.append(int(row[1])-1)
-    
-    predicted = np.array(results)[:,1]
-    
-    true_classes = np.array(true_classes)
-    levenshtein_distance = LevenshteinDistance(true_classes, predicted)
-    levenshtein_accuracy = 1-(levenshtein_distance/len(true_classes))
-    if levenshtein_distance <0: # Distance cannot be less than 0
-        levenshtein_accuracies.update(0, len(true_classes))
+    if opt.no_mean_norm and not opt.std_norm:
+        norm_method = Normalize([0, 0, 0], [1, 1, 1])
+    elif not opt.std_norm:
+        norm_method = Normalize(opt.mean, [1, 1, 1])
     else:
-        levenshtein_accuracies.update(levenshtein_accuracy, len(true_classes))
+        norm_method = Normalize(opt.mean, opt.std)
 
-    
-    print('predicted classes: \t',predicted)
-    print('True classes :\t\t',true_classes)
-    print('Levenshtein Accuracy = {} ({})'.format(levenshtein_accuracies.val, levenshtein_accuracies.avg))
-    
-print('Average Levenshtein Accuracy= {}'.format(levenshtein_accuracies.avg))
 
-print('-----Evaluation is finished------')
+    spatial_transform = Compose([
+        Scale(112),
+        CenterCrop(112),
+        ToTensor(opt.norm_value), norm_method
+        ])
+
+    target_transform = ClassLabel()
+
+
+
+
+    ## Get list of videos to test
+    if opt.dataset == 'egogesture':
+        subject_list = ['Subject{:02d}'.format(i) for i in [2, 9, 11, 14, 18, 19, 28, 31, 41, 47]]
+        test_paths = []
+        for subject in subject_list:
+            for x in glob.glob(os.path.join(opt.video_path,subject,'*/*/rgb*/')):
+                test_paths.append(x)
+    elif opt.dataset == 'nv':
+        df = pd.read_csv(os.path.join(opt.video_path,'nvgesture_test_correct_cvpr2016_v2.lst'), delimiter = ' ', header = None)
+        test_paths = []
+        for x in df[0].values:
+            test_paths.append(os.path.join(opt.video_path, x.replace('path:', ''), 'sk_color_all').replace(os.sep, '/'))
+
+
+
+    print('Start Evaluation')
+    detector.eval()
+    classifier.eval()
+
+    levenshtein_accuracies = AverageMeter()
+    videoidx = 0
+    for path in test_paths[4:]:
+        path = os.path.normpath(path)
+        if opt.dataset == 'egogesture':
+            opt.whole_path = path.rsplit(os.sep, 4)[-4:]
+            opt.whole_path = os.sep.join(opt.whole_path)
+        elif opt.dataset == 'nv':
+            opt.whole_path = path.split(os.sep, 3) # TODO: fix bad dependency on fixed depth file locations
+            opt.whole_path = opt.whole_path[-1]
+        
+        videoidx += 1
+        active_index = 0
+        passive_count = 0
+        active = False
+        prev_active = False
+        finished_prediction = None
+        pre_predict = False
+
+        cum_sum = np.zeros(opt.n_classes_clf,)
+        clf_selected_queue = np.zeros(opt.n_classes_clf,)
+        det_selected_queue = np.zeros(opt.n_classes_det,)
+        myqueue_det = Queue(opt.det_queue_size ,  n_classes = opt.n_classes_det)
+        myqueue_clf = Queue(opt.clf_queue_size, n_classes = opt.n_classes_clf )
+
+
+        print('[{}/{}]============'.format(videoidx,len(test_paths)))
+        print(path)
+        opt.sample_duration = max(opt.sample_duration_clf, opt.sample_duration_det)
+        test_data = get_online_data(
+            opt, spatial_transform, None, target_transform)
+
+        test_loader = torch.utils.data.DataLoader(
+                    test_data,
+                    batch_size=opt.batch_size,
+                    shuffle=False,
+                    num_workers=opt.n_threads,
+                    pin_memory=True)
+
+
+        results = []
+        prev_best1 = opt.n_classes_clf
+
+        for i, (inputs, targets) in enumerate(test_loader):
+            if not opt.no_cuda:
+                targets = targets.cuda(non_blocking=True)
+            ground_truth_array = np.zeros(opt.n_classes_clf +1,)
+            with torch.no_grad():
+                inputs = Variable(inputs)
+                targets = Variable(targets)
+                if opt.modality_det == 'RGB':
+                    inputs_det = inputs[:,:-1,-opt.sample_duration_det:,:,:]
+                elif opt.modality_det == 'Depth':
+                    inputs_det = inputs[:,-1,-opt.sample_duration_det:,:,:].unsqueeze(1)
+                elif opt.modality_det =='RGB-D':
+                    inputs_det = inputs[:,:,-opt.sample_duration_det:,:,:]
+                
+                outputs_det = detector(inputs_det)
+                outputs_det = F.softmax(outputs_det,dim=1)
+                outputs_det = outputs_det.cpu().numpy()[0].reshape(-1,)
+
+                # enqueue the probabilities to the detector queue
+                myqueue_det.enqueue(outputs_det.tolist())
+
+                if opt.det_strategy == 'raw':
+                    det_selected_queue = outputs_det
+                elif opt.det_strategy == 'median':
+                    det_selected_queue = myqueue_det.median
+                elif opt.det_strategy == 'ma':
+                    det_selected_queue = myqueue_det.ma
+                elif opt.det_strategy == 'ewma':
+                    det_selected_queue = myqueue_det.ewma
+                
+
+                prediction_det = np.argmax(det_selected_queue)
+                prob_det = det_selected_queue[prediction_det]
+                
+                #### State of the detector is checked here as detector act as a switch for the classifier
+                if  prediction_det == 1:
+                    if opt.modality_clf == 'RGB':
+                        inputs_clf = inputs[:,:-1,:,:,:]
+                    elif opt.modality_clf == 'Depth':
+                        inputs_clf = inputs[:,-1,:,:,:].unsqueeze(1)
+                    elif opt.modality_clf =='RGB-D':
+                        inputs_clf = inputs[:,:,:,:,:]
+
+                    outputs_clf = classifier(inputs_clf)
+                    outputs_clf = F.softmax(outputs_clf,dim=1)
+                    outputs_clf = outputs_clf.cpu().numpy()[0].reshape(-1,)
+                    
+                    # Push the probabilities to queue
+                    myqueue_clf.enqueue(outputs_clf.tolist())
+                    passive_count = 0
+
+                    if opt.clf_strategy == 'raw':
+                        clf_selected_queue = outputs_clf
+                    elif opt.clf_strategy == 'median':
+                        clf_selected_queue = myqueue_clf.median
+                    elif opt.clf_strategy == 'ma':
+                        clf_selected_queue = myqueue_clf.ma
+                    elif opt.clf_strategy == 'ewma':
+                        clf_selected_queue = myqueue_clf.ewma
+
+                else:
+                    outputs_clf = np.zeros(opt.n_classes_clf ,)
+                    # Push the probabilities to queue
+                    myqueue_clf.enqueue(outputs_clf.tolist())
+                    passive_count += 1
+            
+
+
+            if passive_count >= opt.det_counter:
+                active = False
+            else:
+                active = True
+
+            # one of the following line need to be commented !!!!
+            if active:
+                active_index += 1
+                cum_sum = ((cum_sum * (active_index-1)) + (weighting_func(active_index) * clf_selected_queue))/active_index # Weighted Aproach
+                # cum_sum = ((cum_sum * (x-1)) + (1.0 * clf_selected_queue))/x #Not Weighting Aproach 
+
+                best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
+                if float(cum_sum[best1]- cum_sum[best2]) > opt.clf_threshold_pre:
+                    finished_prediction = True
+                    pre_predict = True
+                
+            else:
+                active_index = 0
+
+
+            if active == False and  prev_active == True:
+                finished_prediction = True
+            elif active == True and  prev_active == False:
+                finished_prediction = False
+
+
+
+            if finished_prediction == True:
+                best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
+                if cum_sum[best1]>opt.clf_threshold_final:
+                    if pre_predict == True:  
+                        if best1 != prev_best1:
+                            if cum_sum[best1]>opt.clf_threshold_final:  
+                                results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
+                                print( 'Early Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))                      
+                    else:
+                        if cum_sum[best1]>opt.clf_threshold_final:
+                            if best1 == prev_best1:
+                                if cum_sum[best1]>5:
+                                    results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
+                                    print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
+                            else:
+                                results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
+                                
+                                print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
+
+                    finished_prediction = False
+                    prev_best1 = best1
+
+                cum_sum = np.zeros(opt.n_classes_clf,)
+
+            if active == False and  prev_active == True:
+                pre_predict = False
+        
+            prev_active = active
+
+        if opt.dataset == 'egogesture':
+            opt.video_path = os.path.normpath(opt.video_path)
+            opt.whole_path = os.path.normpath(opt.whole_path)
+            target_csv_path = os.path.join(opt.video_path, 
+                                    'labels-final-revised1',
+                                    opt.whole_path.rsplit(os.sep, 2)[0],
+                                    'Group'+opt.whole_path.rsplit('.', 1)[0][-1] + '.csv').replace('Subject', 'subject')
+            true_classes = []
+            with open(target_csv_path) as csvfile:
+                readCSV = csv.reader(csvfile, delimiter=',')
+                for row in readCSV:
+                    true_classes.append(int(row[0])-1)
+        elif opt.dataset == 'nv':
+            true_classes = []
+            with open('./annotation_nvGesture/vallistall.txt') as csvfile:
+                readCSV = csv.reader(csvfile, delimiter=' ')
+                for row in readCSV:
+                    if row[0] == opt.whole_path:
+                        if row[1] != '26' :
+                            true_classes.append(int(row[1])-1)
+        
+        predicted = np.array(results)[:,1]
+        
+        true_classes = np.array(true_classes)
+        levenshtein_distance = LevenshteinDistance(true_classes, predicted)
+        levenshtein_accuracy = 1-(levenshtein_distance/len(true_classes))
+        if levenshtein_distance <0: # Distance cannot be less than 0
+            levenshtein_accuracies.update(0, len(true_classes))
+        else:
+            levenshtein_accuracies.update(levenshtein_accuracy, len(true_classes))
+
+        
+        print('predicted classes: \t',predicted)
+        print('True classes :\t\t',true_classes)
+        print('Levenshtein Accuracy = {} ({})'.format(levenshtein_accuracies.val, levenshtein_accuracies.avg))
+        
+    print('Average Levenshtein Accuracy= {}'.format(levenshtein_accuracies.avg))
+
+    print('-----Evaluation is finished------')
+
+if __name__ == '__main__':
+    main()

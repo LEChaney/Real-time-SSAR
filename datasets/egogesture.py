@@ -46,7 +46,8 @@ def get_default_image_loader():
 
 
 def video_loader(video_dir_path, frame_indices, modality, sample_duration, image_loader):
-    
+    video_dir_path = os.path.normpath(video_dir_path)
+
     video = []
     if modality == 'RGB':
         for i in frame_indices:
@@ -136,6 +137,7 @@ def make_dataset(root_path, annotation_path, subset, n_samples_for_each_video,
             print('dataset loading [{}/{}]'.format(i, len(video_names)))
 
         video_path = os.path.join(root_path, video_names[i])
+        video_path = video_path.replace(os.sep, '/') # Make path formatting consistent
         
         if not os.path.exists(video_path):
             continue
