@@ -57,9 +57,7 @@ def generate_model(opt):
                 num_classes=opt.n_classes)
     
     if not opt.no_cuda:
-        model = model.cuda()
-        model = nn.DataParallel(model, device_ids=None)
-
+        
         if opt.pretrain_path:
             print('loading pretrained model {}'.format(opt.pretrain_path))
             pretrain = torch.load(opt.pretrain_path)
@@ -91,6 +89,8 @@ def generate_model(opt):
             print("[INFO]: RGB model is used for init model")
             model = _modify_first_conv_layer(model,int(opt.sample_duration/2),1) 
 
+        model = model.cuda()
+        model = nn.DataParallel(model, device_ids=None)
 
         if opt.model == 'c3d':# CHECK HERE
             model.module.fc = nn.Linear(
