@@ -3,12 +3,19 @@ from torch import nn
 import pdb
 
 from models import resnet, resnext, resnetl, c3d
+from torchvision.models.resnet import resnet18
 
 
 def generate_model(opt):
     assert opt.model in [
-        'resnet', 'resnetl', 'resnext', 'c3d'
+        'resnet', 'resnetl', 'resnext', 'c3d', 'ssar'
     ]
+
+    if opt.model == 'ssar':
+        from ssar.model.model import SSAR
+
+        rnet = resnet18(False)
+        model = SSAR(ResNet=rnet, input_size=83, number_of_classes=83, batch_size=1, dropout=0)
 
     if opt.model == 'resnet':
         assert opt.model_depth in [10]
@@ -57,7 +64,20 @@ def generate_model(opt):
                 num_classes=opt.n_classes)
     
     if not opt.no_cuda:
-        
+        if opt.model == 'ssar':
+            if opt.pretrain_path:
+                print('loading pretrained model {}'.format(opt.pretrain_path))
+                state = model.state_dict()
+                state.update(torch.load(opt.pretrain_path))
+
+                model.load_state_dict(state)
+
+            # model = nn.DataParallel(model, device_ids=None)
+            model = model.cuda()
+
+            parameters = model.parameters()
+            return model, parameters
+            
         if opt.pretrain_path:
             print('loading pretrained model {}'.format(opt.pretrain_path))
             pretrain = torch.load(opt.pretrain_path)
@@ -65,6 +85,7 @@ def generate_model(opt):
 
             model.load_state_dict(pretrain['state_dict'])
 
+    
         if opt.modality == 'RGB' and opt.model != 'c3d':
             print("[INFO]: RGB model is used for init model")
             model = _modify_first_conv_layer(model,3,3) ##### Check models trained (3,7,7) or (7,7,7)
@@ -82,16 +103,16 @@ def generate_model(opt):
         # Check first kernel size 
         modules = list(model.modules())
         first_conv_idx = list(filter(lambda x: isinstance(modules[x], nn.Conv3d),
-                                                   list(range(len(modules)))))[0]
+                                                list(range(len(modules)))))[0]
 
         conv_layer = modules[first_conv_idx]
         if conv_layer.kernel_size[0]> opt.sample_duration:
             print("[INFO]: RGB model is used for init model")
             model = _modify_first_conv_layer(model,int(opt.sample_duration/2),1) 
 
-        model = model.cuda()
         model = nn.DataParallel(model, device_ids=None)
-
+        model = model.cuda()
+        
         if opt.model == 'c3d':# CHECK HERE
             model.module.fc = nn.Linear(
                 model.module.fc[0].in_features, model.module.fc[0].out_features)
@@ -105,6 +126,17 @@ def generate_model(opt):
         return model, parameters
 
     else:
+        if opt.model == 'ssar':
+            if opt.pretrain_path:
+                print('loading pretrained model {}'.format(opt.pretrain_path))
+                state = model.state_dict()
+                state.update(torch.load(opt.pretrain_path))
+
+                model.load_state_dict(state)
+
+            parameters = model.parameters()
+            return model, parameters
+
         if opt.pretrain_path:
             print('loading pretrained model {}'.format(opt.pretrain_path))
             pretrain = torch.load(opt.pretrain_path)

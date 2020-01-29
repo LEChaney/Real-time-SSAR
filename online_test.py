@@ -19,6 +19,7 @@ from model import generate_model
 from mean import get_mean, get_std
 from spatial_transforms import *
 from temporal_transforms import *
+from torchvision import transforms
 from target_transforms import ClassLabel
 from dataset import get_online_data 
 from utils import Logger, AverageMeter, LevenshteinDistance, Queue
@@ -120,11 +121,17 @@ def load_models(opt):
     classifier, parameters = generate_model(opt)
 
     if opt.resume_path:
-        print('loading checkpoint {}'.format(opt.resume_path))
-        checkpoint = torch.load(opt.resume_path)
-        assert opt.arch == checkpoint['arch']
+        print('loading pretrained model {}'.format(opt.pretrain_path))
+        if opt.model == 'ssar':
+            state = classifier.state_dict()
+            state.update(torch.load(opt.resume_path))
 
-        classifier.load_state_dict(checkpoint['state_dict'])
+            classifier.load_state_dict(state)
+        else:
+            checkpoint = torch.load(opt.resume_path)
+            assert opt.arch == checkpoint['arch']
+
+            classifier.load_state_dict(checkpoint['state_dict'])
 
     print('Model 2 \n', classifier)
     pytorch_total_params = sum(p.numel() for p in classifier.parameters() if
@@ -145,6 +152,15 @@ def main():
     else:
         norm_method = Normalize(opt.mean, opt.std)
 
+    if opt.model_clf == 'ssar':
+        opt.sample_size_clf = (126, 224)
+        opt.mean_clf = (0.485, 0.456, 0.406)
+        opt.std_clf = (0.229, 0.224, 0.225)
+
+        spatial_transform_clf = transforms.Compose([
+        transforms.Resize(opt.sample_size_clf),
+        transforms.ToTensor(),
+        transforms.Normalize(opt.mean_clf, opt.std_clf)])
 
     spatial_transform = Compose([
         Scale(112),
@@ -205,8 +221,13 @@ def main():
         print('[{}/{}]============'.format(videoidx,len(test_paths)))
         print(path)
         opt.sample_duration = max(opt.sample_duration_clf, opt.sample_duration_det)
-        test_data = get_online_data(
-            opt, spatial_transform, None, target_transform)
+
+        if opt.model_clf == 'ssar':
+            test_data = get_online_data(
+                opt, [spatial_transform, spatial_transform_clf], None, target_transform, modality='RGB')
+        else:
+            test_data = get_online_data(
+                opt, spatial_transform, None, target_transform)
 
         test_loader = torch.utils.data.DataLoader(
                     test_data,
@@ -219,7 +240,16 @@ def main():
         results = []
         prev_best1 = opt.n_classes_clf
 
+        # x_data, y_data = [], []
+        # fig, ax = plt.subplots(nrows=1, ncols=2)
+
+        if opt.model_clf == 'ssar':
+            # Init recurrent state zero
+            lstm_hidden = [None, None, None, None]
+
         for i, (inputs, targets) in enumerate(test_loader):
+            if opt.model_clf == 'ssar':
+                inputs, inputs_clf = inputs
             if not opt.no_cuda:
                 targets = targets.cuda(non_blocking=True)
             ground_truth_array = np.zeros(opt.n_classes_clf +1,)
@@ -227,15 +257,25 @@ def main():
                 inputs = Variable(inputs)
                 targets = Variable(targets)
                 if opt.modality_det == 'RGB':
-                    inputs_det = inputs[:,:-1,-opt.sample_duration_det:,:,:]
+                    inputs_det = inputs[:,:3,-opt.sample_duration_det:,:,:]
                 elif opt.modality_det == 'Depth':
                     inputs_det = inputs[:,-1,-opt.sample_duration_det:,:,:].unsqueeze(1)
                 elif opt.modality_det =='RGB-D':
                     inputs_det = inputs[:,:,-opt.sample_duration_det:,:,:]
                 
+                # print(inputs_det[0, :, -1, 0:4, 0:4])
                 outputs_det = detector(inputs_det)
                 outputs_det = F.softmax(outputs_det,dim=1)
                 outputs_det = outputs_det.cpu().numpy()[0].reshape(-1,)
+
+                # x_data.append(i)
+                # y_data.append(outputs_det[1])
+                # ax[0].plot(x_data, y_data, '-')
+                # mean = np.array(opt.mean, dtype=np.float32).reshape(1, 1, -1)
+                # img = inputs_det[0, :, -1].permute(1, 2, 0).cpu().numpy() + mean
+                # img = img.astype(int)
+                # ax[1].imshow(img)
+                # plt.pause(0.001)
 
                 # enqueue the probabilities to the detector queue
                 myqueue_det.enqueue(outputs_det.tolist())
@@ -255,14 +295,28 @@ def main():
                 
                 #### State of the detector is checked here as detector act as a switch for the classifier
                 if  prediction_det == 1:
-                    if opt.modality_clf == 'RGB':
-                        inputs_clf = inputs[:,:-1,:,:,:]
-                    elif opt.modality_clf == 'Depth':
-                        inputs_clf = inputs[:,-1,:,:,:].unsqueeze(1)
-                    elif opt.modality_clf =='RGB-D':
-                        inputs_clf = inputs[:,:,:,:,:]
+                    if opt.model_clf == 'ssar':
+                        inputs_clf = Variable(inputs_clf)
+                        if not opt.no_cuda:
+                            inputs_clf = inputs_clf.cuda()
+                        if opt.modality_clf == 'RGB':
+                            inputs_clf = inputs_clf[:,:3,-1,:,:]
+                        elif opt.modality_clf == 'Depth':
+                            inputs_clf = inputs_clf[:,-1,-1,:,:].unsqueeze(1)
+                        elif opt.modality_clf =='RGB-D':
+                            inputs_clf = inputs_clf[:,:,-1,:,:]
 
-                    outputs_clf = classifier(inputs_clf)
+                        outputs_clf, lstm_hidden = classifier(inputs_clf, lstm_hidden)
+                    else:
+                        if opt.modality_clf == 'RGB':
+                            inputs_clf = inputs[:,:3,:,:,:]
+                        elif opt.modality_clf == 'Depth':
+                            inputs_clf = inputs[:,-1,:,:,:].unsqueeze(1)
+                        elif opt.modality_clf =='RGB-D':
+                            inputs_clf = inputs[:,:,:,:,:]
+
+                        outputs_clf = classifier(inputs_clf)
+
                     outputs_clf = F.softmax(outputs_clf,dim=1)
                     outputs_clf = outputs_clf.cpu().numpy()[0].reshape(-1,)
                     
@@ -280,6 +334,10 @@ def main():
                         clf_selected_queue = myqueue_clf.ewma
 
                 else:
+                    if opt.model_clf == 'ssar':
+                        # Reset recurrent state
+                        lstm_hidden = [None, None, None, None]
+
                     outputs_clf = np.zeros(opt.n_classes_clf ,)
                     # Push the probabilities to queue
                     myqueue_clf.enqueue(outputs_clf.tolist())
