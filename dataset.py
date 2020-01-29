@@ -1,7 +1,7 @@
 from datasets.jester import Jester
 from datasets.egogesture import EgoGesture
 from datasets.nv import NV
-from datasets.egogesture_online import EgoGestureOnline
+from datasets.egogesture_online import EgoGestureOnline, EgoGestureOnlineMultiTransform
 from datasets.nv_online import NVOnline
 
 def get_training_set(opt, spatial_transform, temporal_transform,
@@ -127,21 +127,34 @@ def get_test_set(opt, spatial_transform, temporal_transform, target_transform):
             modality=opt.modality)
     return test_data
 
-def get_online_data(opt, spatial_transform, temporal_transform, target_transform):
+def get_online_data(opt, spatial_transform, temporal_transform, target_transform, modality="RGB-D"):
     assert opt.dataset in [ 'egogesture', 'nv']
     whole_path = opt.whole_path
     if opt.dataset == 'egogesture':
-        online_data = EgoGestureOnline(
-            opt.annotation_path,  
-            opt.video_path,
-            opt.whole_path,  
-            opt.n_val_samples,
-            spatial_transform,
-            temporal_transform,
-            target_transform,
-            modality="RGB-D",
-            stride_len = opt.stride_len,
-            sample_duration=opt.sample_duration)
+        if isinstance(spatial_transform, list):
+            online_data = EgoGestureOnlineMultiTransform(
+                opt.annotation_path,  
+                opt.video_path,
+                opt.whole_path,  
+                opt.n_val_samples,
+                spatial_transform,
+                temporal_transform,
+                target_transform,
+                modality=modality,
+                stride_len = opt.stride_len,
+                sample_duration=opt.sample_duration)
+        else:
+            online_data = EgoGestureOnline(
+                opt.annotation_path,  
+                opt.video_path,
+                opt.whole_path,  
+                opt.n_val_samples,
+                spatial_transform,
+                temporal_transform,
+                target_transform,
+                modality=modality,
+                stride_len = opt.stride_len,
+                sample_duration=opt.sample_duration)
     if opt.dataset == 'nv':
         online_data = NVOnline(
             opt.annotation_path,  
@@ -151,7 +164,7 @@ def get_online_data(opt, spatial_transform, temporal_transform, target_transform
             spatial_transform,
             temporal_transform,
             target_transform,
-            modality="RGB-D",
+            modality=modality,
             stride_len = opt.stride_len,
             sample_duration=opt.sample_duration)
     
