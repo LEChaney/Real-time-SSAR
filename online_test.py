@@ -240,8 +240,18 @@ def main():
         results = []
         prev_best1 = opt.n_classes_clf
 
-        # x_data, y_data = [], []
-        # fig, ax = plt.subplots(nrows=1, ncols=2)
+        fig, ax = plt.subplots(nrows=1, ncols=2)
+        ax[0].set_xlim(0, 200)
+        ax[0].set_ylim(0, 1)
+
+        x_data, y_datas = [], []
+        lines = []
+        for _ in range(opt.n_classes_clf):
+            y_data = []
+            y_datas.append(y_data)
+            line, = ax[0].plot(x_data, y_data)
+            lines.append(line)
+
 
         if opt.model_clf == 'ssar':
             # Init recurrent state zero
@@ -360,6 +370,20 @@ def main():
                 if float(cum_sum[best1]- cum_sum[best2]) > opt.clf_threshold_pre:
                     finished_prediction = True
                     pre_predict = True
+
+                # Visualize
+                x_data.append(i)
+                for j, y_data in enumerate(y_datas):
+                    y_data.append(cum_sum[j])
+                    lines[j].set_xdata(x_data)
+                    lines[j].set_ydata(y_data)
+                ax[0].set_xlim(i - 200, i)
+                mean = np.array(opt.mean, dtype=np.float32).reshape(1, 1, -1)
+                img = inputs_det[0, :, -1].permute(1, 2, 0).cpu().numpy() + mean
+                img = img.astype(int)
+                ax[1].imshow(img)
+                plt.draw()
+                plt.pause(0.001)
                 
             else:
                 active_index = 0
