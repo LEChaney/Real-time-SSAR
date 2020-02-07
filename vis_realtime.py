@@ -120,6 +120,8 @@ def test_on_video(video_path, detector, classifier, opt):
             # Toggle classifier using detector
             if y_hat_det > 0.5:
                 mask, y_hat_clf, lstm_hidden = classifier(inputs_clf, lstm_hidden, get_mask=True)
+                mask = (mask[0][0].cpu().numpy() + 127) / 255
+                cv2.imshow('mask', mask)
                 y_hat_clf = y_hat_clf.squeeze(dim=0)
                 # print(y_hat_clf)
                 cur_label_pred = torch.argmax(y_hat_clf, dim=0).item()
@@ -185,4 +187,4 @@ if __name__ == "__main__":
     classifier.load_state_dict(state)
     classifier.eval()
 
-    test_on_video('../EgoGesture/Subject25/Scene1/Color/rgb1.avi', detector, classifier, opt)
+    test_on_video('../EgoGesture/Subject03/Scene4/Color/rgb2.avi', detector, classifier, opt)

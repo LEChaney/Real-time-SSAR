@@ -186,7 +186,22 @@ def main():
         for x in df[0].values:
             test_paths.append(os.path.join(opt.video_path, x.replace('path:', ''), 'sk_color_all').replace(os.sep, '/'))
 
+    # Figures setup
+    fig, ax = plt.subplots(nrows=6, ncols=1)
 
+    x_data, y_datas = [], []
+    lines = []
+    for j in range(6):
+        if j != 0:
+            ax[j].set_xlim(0, 400)
+            ax[j].set_ylim(0, 1)
+        y_datas.append([])
+        lines.append([])
+        for _ in range(opt.n_classes_clf):
+            y_data = []
+            y_datas[j].append(y_data)
+            line, = ax[j].plot(x_data, y_data)
+            lines[j].append(line)
 
     print('Start Evaluation')
     detector.eval()
@@ -194,7 +209,7 @@ def main():
 
     levenshtein_accuracies = AverageMeter()
     videoidx = 0
-    for path in test_paths[4:]:
+    for path in test_paths[7:]:
         path = os.path.normpath(path)
         if opt.dataset == 'egogesture':
             opt.whole_path = path.rsplit(os.sep, 4)[-4:]
@@ -205,13 +220,14 @@ def main():
         
         videoidx += 1
         active_index = 0
-        passive_count = 0
+        passive_count = 999
         active = False
         prev_active = False
         finished_prediction = None
         pre_predict = False
 
         cum_sum = np.zeros(opt.n_classes_clf,)
+        cum_sum_unweighted = np.zeros(opt.n_classes_clf,)
         clf_selected_queue = np.zeros(opt.n_classes_clf,)
         det_selected_queue = np.zeros(opt.n_classes_det,)
         myqueue_det = Queue(opt.det_queue_size ,  n_classes = opt.n_classes_det)
@@ -240,19 +256,6 @@ def main():
         results = []
         prev_best1 = opt.n_classes_clf
 
-        fig, ax = plt.subplots(nrows=1, ncols=2)
-        ax[0].set_xlim(0, 200)
-        ax[0].set_ylim(0, 1)
-
-        x_data, y_datas = [], []
-        lines = []
-        for _ in range(opt.n_classes_clf):
-            y_data = []
-            y_datas.append(y_data)
-            line, = ax[0].plot(x_data, y_data)
-            lines.append(line)
-
-
         if opt.model_clf == 'ssar':
             # Init recurrent state zero
             lstm_hidden = [None, None, None, None]
@@ -278,15 +281,6 @@ def main():
                 outputs_det = F.softmax(outputs_det,dim=1)
                 outputs_det = outputs_det.cpu().numpy()[0].reshape(-1,)
 
-                # x_data.append(i)
-                # y_data.append(outputs_det[1])
-                # ax[0].plot(x_data, y_data, '-')
-                # mean = np.array(opt.mean, dtype=np.float32).reshape(1, 1, -1)
-                # img = inputs_det[0, :, -1].permute(1, 2, 0).cpu().numpy() + mean
-                # img = img.astype(int)
-                # ax[1].imshow(img)
-                # plt.pause(0.001)
-
                 # enqueue the probabilities to the detector queue
                 myqueue_det.enqueue(outputs_det.tolist())
 
@@ -301,7 +295,7 @@ def main():
                 
 
                 prediction_det = np.argmax(det_selected_queue)
-                prob_det = det_selected_queue[prediction_det]
+                prob_det = det_selected_queue[1]
                 
                 #### State of the detector is checked here as detector act as a switch for the classifier
                 if  prediction_det == 1:
@@ -364,30 +358,39 @@ def main():
             if active:
                 active_index += 1
                 cum_sum = ((cum_sum * (active_index-1)) + (weighting_func(active_index) * clf_selected_queue))/active_index # Weighted Aproach
-                # cum_sum = ((cum_sum * (x-1)) + (1.0 * clf_selected_queue))/x #Not Weighting Aproach 
+                cum_sum_unweighted = ((cum_sum_unweighted * (active_index-1)) + (1.0 * clf_selected_queue))/active_index #Not Weighting Aproach 
 
                 best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
                 if float(cum_sum[best1]- cum_sum[best2]) > opt.clf_threshold_pre:
                     finished_prediction = True
                     pre_predict = True
 
-                # Visualize
-                x_data.append(i)
-                for j, y_data in enumerate(y_datas):
-                    y_data.append(cum_sum[j])
-                    lines[j].set_xdata(x_data)
-                    lines[j].set_ydata(y_data)
-                ax[0].set_xlim(i - 200, i)
-                mean = np.array(opt.mean, dtype=np.float32).reshape(1, 1, -1)
-                img = inputs_det[0, :, -1].permute(1, 2, 0).cpu().numpy() + mean
-                img = img.astype(int)
-                ax[1].imshow(img)
-                plt.draw()
-                plt.pause(0.001)
-                
             else:
                 active_index = 0
 
+            # Visualize
+            x_data.append(i)
+            y_datas[1][0].append(prob_det)
+            lines[1][0].set_xdata(x_data)
+            lines[1][0].set_ydata(y_datas[1][0])
+            for j in range(opt.n_classes_clf):
+                y_datas[2][j].append(cum_sum[j])
+                y_datas[3][j].append(cum_sum_unweighted[j])
+                y_datas[4][j].append(clf_selected_queue[j] if active else 0)
+                for k in range(2, 5):
+                    lines[k][j].set_xdata(x_data)
+                    lines[k][j].set_ydata(y_datas[k][j])
+            for k in range(1, 6):
+                ax[k].set_xlim(i - 400, i)
+            mean = np.array(opt.mean, dtype=np.float32).reshape(1, 1, -1)
+            img = inputs_det[0, :, -1].permute(1, 2, 0).cpu().numpy() + mean
+            img = img.astype(int)
+            if i == 0:
+                im_plt = ax[0].imshow(img)
+            else:
+                im_plt.set_data(img)
+            plt.draw()
+            plt.pause(0.001)
 
             if active == False and  prev_active == True:
                 finished_prediction = True
@@ -398,27 +401,33 @@ def main():
 
             if finished_prediction == True:
                 best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
-                if cum_sum[best1]>opt.clf_threshold_final:
-                    if pre_predict == True:  
-                        if best1 != prev_best1:
-                            if cum_sum[best1]>opt.clf_threshold_final:  
+                if pre_predict == True:  
+                    if best1 != prev_best1:
+                        if cum_sum[best1]>opt.clf_threshold_final:  
+                            results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
+                            print( 'Early Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))                      
+                else:
+                    # raw_best = clf_selected_queue.argsort()[-1]
+                    # results.append(((i*opt.stride_len)+opt.sample_duration_clf,raw_best))
+                    # print( 'Late Detected - class : {} with prob : {} at frame {}'.format(raw_best, clf_selected_queue[raw_best], (i*opt.stride_len)+opt.sample_duration_clf))
+                    if cum_sum[best1]>opt.clf_threshold_final:
+                        if best1 == prev_best1:
+                            if cum_sum[best1]>5:
                                 results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
-                                print( 'Early Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))                      
-                    else:
-                        if cum_sum[best1]>opt.clf_threshold_final:
-                            if best1 == prev_best1:
-                                if cum_sum[best1]>5:
-                                    results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
-                                    print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
-                            else:
-                                results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
-                                
                                 print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
+                        else:
+                            results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
+                            
+                            print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
 
-                    finished_prediction = False
                     prev_best1 = best1
+                    finished_prediction = False
+
+                # prev_best1 = best1
+                # finished_prediction = False
 
                 cum_sum = np.zeros(opt.n_classes_clf,)
+                cum_sum_unweighted = np.zeros(opt.n_classes_clf,)
 
             if active == False and  prev_active == True:
                 pre_predict = False
