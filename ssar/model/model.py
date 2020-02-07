@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.init import orthogonal_, zeros_, xavier_normal_
-from torch.nn.utils.rnn import pad_packed_sequence
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 
 class SSAREncoder(nn.Module):
@@ -113,22 +113,25 @@ class SSARLSTM(nn.Module):
         zeros_(self.lstm4.all_weights[0][2])
         zeros_(self.lstm4.all_weights[0][3])
 
-    def forward(self, x, lengths=None, hidden=[None, None, None, None]):
+    def forward(self, x, lengths=None, hidden=None):
+        if hidden is None:
+            hidden = [None, None, None, None]
+
         sequence_labels, hidden[0] = self.lstm1(x, hidden[0])
         sequence_labels, hidden[1] = self.lstm2(sequence_labels, hidden[1])
         sequence_labels, hidden[2] = self.lstm3(sequence_labels, hidden[2])
         sequence_labels, hidden[3] = self.lstm4(sequence_labels, hidden[3])
         if type(sequence_labels) is nn.utils.rnn.PackedSequence:
             sequence_labels, seq_lengths = pad_packed_sequence(sequence=sequence_labels, batch_first=True)
-        else:
-            seq_lengths = lengths
-        batch_size = sequence_labels.shape[0]
-        out = sequence_labels[0, seq_lengths[0] - 1, :]
-        out = out.unsqueeze(dim=0)
-        for i in range(1, batch_size):
-            out = torch.cat((out, sequence_labels[i, seq_lengths[i] - 1, :].unsqueeze(dim=0)))
+        # else:
+        #     seq_lengths = lengths
+        # batch_size = sequence_labels.shape[0]
+        # out = sequence_labels[0, seq_lengths[0] - 1, :]
+        # out = out.unsqueeze(dim=0)
+        # for i in range(1, batch_size):
+        #     out = torch.cat((out, sequence_labels[i, seq_lengths[i] - 1, :].unsqueeze(dim=0)))
 
-        label = self.fc(out)
+        label = self.fc(sequence_labels)
         return label, hidden
 
 
@@ -141,17 +144,25 @@ class SSAR(nn.Module):
         self.embedding_generator = SSAREmbeddingGenerator()
         self.lstms = SSARLSTM(input_size, number_of_classes, batch_size, dropout)
 
-    def forward(self, x, lstm_hidden=[None, None, None, None], get_mask=False):
+    def forward(self, x, lstm_hidden=None, lengths=None, get_mask=False):
+        batch_size = x.shape[0]
+        x = x.view(torch.Size([-1]) + x.shape[-3:])
+
         x = self.encoder(x)
 
         embeddings = self.embedding_generator(x)
-        lengths = [embeddings.shape[0]]
-        embeddings = embeddings.unsqueeze(0)
+        if lengths is None:
+            lengths = [embeddings.shape[0]]
+            embeddings = embeddings.unsqueeze(0)
+        else:
+            embeddings = embeddings.view(torch.Size([batch_size, -1]) + embeddings.shape[1:])
+            embeddings = pack_padded_sequence(embeddings, lengths=lengths, batch_first=True, enforce_sorted=False)
 
         label, lstm_hidden = self.lstms(embeddings, lengths, lstm_hidden)
 
         if get_mask:
             mask = self.decoder(x)
+            mask = mask.view(torch.Size([batch_size, -1]) + mask.shape[1:])
             return mask, label, lstm_hidden
         else:
             return label, lstm_hidden

@@ -3,6 +3,9 @@ import numpy as np
 import os
 import pickle
 
+import torch
+from torch.utils.data import Sampler
+
 
 def split_data(number_of_samples, shuffle=True, train_fraction=1.0, validation_fraction=0):
     """
@@ -75,3 +78,37 @@ def check_and_split_data(host_name, data_folder, dataset_len, train_fraction, va
         pickle.dump(meta_data, f)
         print('{}: Saved {} indices list to metadata folder'.format(datetime.datetime.now().time(), meta_data_file))
     return training_indices, validation_indices, testing_indices
+
+class FixedIndicesSampler(Sampler):
+    def __init__(self, indices):
+        self.indices = indices
+
+    def __len__(self):
+        return len(self.indices)
+    
+    def __iter__(self):
+        return iter(self.indices)
+
+def collate_fn_padd(batch):
+    '''
+    Padds batch of variable length
+
+    note: it converts things ToTensor manually here since the ToTensor transform
+    assume it takes in images rather than arbitrary tensors.
+    '''
+    sample_batch = {}
+    for key in batch[0]:
+        if isinstance(batch[0][key], torch.Tensor):
+            ## get sequence lengths
+            # lengths = [sample[key].shape[0] for sample in batch]
+            ## padd
+            elem_batch = [sample[key] for sample in batch]
+            elem_batch = torch.nn.utils.rnn.pad_sequence(elem_batch, batch_first=True)
+            # elem_batch = torch.nn.utils.rnn.pack_padded_sequence(elem_batch, lengths=lengths, batch_first=True, enforce_sorted=False)
+        elif isinstance(batch[0][key], int):
+            elem_batch = [sample[key] for sample in batch]
+            elem_batch = torch.LongTensor(elem_batch)
+        else:
+            elem_batch = [sample[key] for sample in batch]
+        sample_batch[key] = elem_batch
+    return sample_batch
