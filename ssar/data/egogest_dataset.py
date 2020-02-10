@@ -202,8 +202,9 @@ class EgoGestDataSequence(Dataset):
                 mask = torch.squeeze(mask)
             images[i, :, :, :] = image
             masks[i, :, :] = mask
+        label = torch.tensor([gesture[0]]).repeat([num_images])
 
-        sample = {'images': images, 'masks': masks, 'label': gesture[0],
+        sample = {'images': images, 'masks': masks, 'label': label,
                   'img_name': image_names, 'msk_name': mask_names, 'length': num_images}
 
         return sample

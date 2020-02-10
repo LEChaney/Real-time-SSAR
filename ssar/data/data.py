@@ -100,11 +100,11 @@ def collate_fn_padd(batch):
     for key in batch[0]:
         if isinstance(batch[0][key], torch.Tensor):
             ## get sequence lengths
-            # lengths = [sample[key].shape[0] for sample in batch]
+            lengths = [sample[key].shape[0] for sample in batch]
             ## padd
             elem_batch = [sample[key] for sample in batch]
             elem_batch = torch.nn.utils.rnn.pad_sequence(elem_batch, batch_first=True)
-            # elem_batch = torch.nn.utils.rnn.pack_padded_sequence(elem_batch, lengths=lengths, batch_first=True, enforce_sorted=False)
+            elem_batch = torch.nn.utils.rnn.pack_padded_sequence(elem_batch, lengths=lengths, batch_first=True, enforce_sorted=False)
         elif isinstance(batch[0][key], int):
             elem_batch = [sample[key] for sample in batch]
             elem_batch = torch.LongTensor(elem_batch)
