@@ -48,7 +48,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
-        num_workers=8,
+        num_workers=0,
         pin_memory=True,
         sampler=FixedIndicesSampler(train_indices),
         collate_fn=collate_fn_padd)
@@ -86,7 +86,9 @@ def main():
 
     correct_count = 0
     count = 0
-    for sample in train_loader:
+    loss_sum = 0
+    optimizer.zero_grad()
+    for i, sample in enumerate(train_loader):
         images = sample['images']
 
         images = images.cuda()
@@ -94,21 +96,30 @@ def main():
         lengths = sample['length'].cuda()
         true_mask = sample['masks']
 
-        optimizer.zero_grad()
-
         generated_labels, _ = md(images, lengths=lengths, get_mask=False)
+
+        end_indices = (lengths - 1)
+        indices = end_indices.view(-1, 1, 1).repeat(1, generated_labels.shape[1], 1)
+        generated_labels = generated_labels.gather(2, indices).squeeze(2)
+        indices = end_indices.view(-1, 1)
+        labels = labels.gather(1, indices).squeeze(1)
+
         loss = criterion(generated_labels, labels)
         loss.backward()
         
         optimizer.step()
+        optimizer.zero_grad()
 
         with torch.no_grad():
-            end_indices = (lengths - 1)
-            indices = end_indices.view(-1, 1, 1).repeat(1, generated_labels.shape[1], 1)
-            generated_labels = generated_labels.gather(2, indices).squeeze(2)
+            loss_sum += loss
+            loss_mean = loss_sum / (i + 1)
+
+            # end_indices = (lengths - 1)
+            # indices = end_indices.view(-1, 1, 1).repeat(1, generated_labels.shape[1], 1)
+            # generated_labels = generated_labels.gather(2, indices).squeeze(2)
             generated_labels = torch.argmax(generated_labels, dim=1)
-            indices = end_indices.view(-1, 1)
-            labels = labels.gather(1, indices).squeeze(1)
+            # indices = end_indices.view(-1, 1)
+            # labels = labels.gather(1, indices).squeeze(1)
             correct_count += torch.sum(labels == generated_labels).item()
 
             # if count == 0:
@@ -135,9 +146,13 @@ def main():
             print("correct count {}".format(correct_count))
             print("processed {}".format(count))
             print("accuracy {}".format(correct_count / count))
+            print(f"loss (batch) {loss}")
+            print(f"loss mean {loss_mean}")
     print("correct count {}".format(correct_count))
     print("processed {}".format(count))
     print("accuracy {}".format(correct_count / count))
+    print(f"loss (batch) {loss}")
+    print(f"loss mean {loss_mean}")
 
 
 if __name__ == "__main__":
