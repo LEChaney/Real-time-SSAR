@@ -142,7 +142,7 @@ class SSAR(nn.Module):
         self.lstms = SSARLSTM(input_size, number_of_classes, batch_size, dropout)
         self.batch_size = batch_size
 
-    def forward(self, x, lstm_hidden=None, lengths=None, get_mask=False):
+    def forward(self, x, lstm_hidden=None, lengths=None, get_mask=False, get_lstm_state=False):
         packed_seq = None
         if type(x) is nn.utils.rnn.PackedSequence:
             packed_seq = x
@@ -160,11 +160,22 @@ class SSAR(nn.Module):
 
         label, lstm_hidden = self.lstms(embeddings, lengths, lstm_hidden)
 
+        outputs = []
         if get_mask:
             mask = self.decoder(x)
             if packed_seq is not None:
                 mask = PackedSequence(mask, packed_seq.batch_sizes, packed_seq.sorted_indices, packed_seq.unsorted_indices)
                 mask, _ = pad_packed_sequence(sequence=mask, batch_first=True)
-            return mask, label, lstm_hidden
+            outputs.append(mask)
+
+        outputs.append(label)
+
+        if get_lstm_state:
+            outputs.append(lstm_hidden)
+
+        # Handle single output case
+        if len(outputs) == 1:
+            return outputs[0]
         else:
-            return label, lstm_hidden
+            return outputs
+
