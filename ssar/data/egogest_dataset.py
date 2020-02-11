@@ -119,13 +119,14 @@ class EgoGestData(Dataset):
 
 
 class EgoGestDataSequence(Dataset):
-    def __init__(self, directory, hostname, image_transform=None, mask_transform=None):
+    def __init__(self, directory, hostname, image_transform=None, mask_transform=None, get_mask=True):
         self.directory = directory
         self.hostname = hostname
         self.gesture_list = []
         self.initialise_gesture_list()
         self.image_transform = image_transform
         self.mask_transform = mask_transform
+        self.get_mask = get_mask
 
     def initialise_gesture_list(self):
         path = self.directory + 'labels-final-revised1'
@@ -183,28 +184,38 @@ class EgoGestDataSequence(Dataset):
 
         gesture = self.gesture_list[idx]
         image_names = gesture[1]
-        mask_names = []
-        for image_name in image_names:
-            mask_names.append(image_name.replace('Color/rgb', 'Depth/depth'))
         num_images = len(image_names)
 
+        if self.get_mask:
+            mask_names = []
+            for image_name in image_names:
+                mask_names.append(image_name.replace('Color/rgb', 'Depth/depth'))
+
         images = torch.ones((num_images, 3, 126, 224))
-        masks = torch.ones(num_images, 126, 224)
-        for image_name, mask_name, i in zip(image_names, mask_names, range(num_images)):
+        if self.get_mask:
+            masks = torch.ones(num_images, 126, 224)
+        for i, image_name in enumerate(image_names):
             image = Image.open(image_name).convert("RGB").resize((224, 126), Image.BILINEAR)
-            mask = Image.open(mask_name).convert("L").resize((224, 126), Image.BILINEAR)
-            threshold = 10
-            mask = mask.point(lambda p: p > threshold and 255)
             if self.image_transform:
                 image = self.image_transform(image)
-            if self.mask_transform:
-                mask = self.mask_transform(mask)
-                mask = torch.squeeze(mask)
             images[i, :, :, :] = image
-            masks[i, :, :] = mask
+
+            if self.get_mask:
+                mask_name = mask_names[i]
+                mask = Image.open(mask_name).convert("L").resize((224, 126), Image.BILINEAR)
+                threshold = 10
+                mask = mask.point(lambda p: p > threshold and 255)
+                if self.mask_transform:
+                    mask = self.mask_transform(mask)
+                    mask = torch.squeeze(mask)
+                masks[i, :, :] = mask
+                
         label = torch.tensor([gesture[0]]).repeat([num_images])
 
-        sample = {'images': images, 'masks': masks, 'label': label,
-                  'img_name': image_names, 'msk_name': mask_names, 'length': num_images}
+        sample = {'images': images, 'label': label,
+                  'img_name': image_names, 'length': num_images}
+        if self.get_mask:
+            sample['masks'] = masks
+            sample['msk_name'] = mask_names
 
         return sample
