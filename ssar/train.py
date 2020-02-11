@@ -142,7 +142,7 @@ def main():
             loss_sum += loss
             losses_seen += 1
             correct_count_samples += batch_correct_count_samples
-            loss_mean = loss_sum / losses_seen
+            loss_epoch = loss_sum / losses_seen
             accuracy_hist = correct_count_samples / gesture_count
 
             if (step + 1) % 10 == 0:
@@ -150,8 +150,8 @@ def main():
                     f"Processed Gestures: {gesture_count},",
                     f"Correct Count (@t={rel_poses[default_acc_bin_idx]:.2f}): {correct_count_samples[default_acc_bin_idx]},",
                     f"Accuracy (@t={rel_poses[default_acc_bin_idx]:.2f}): {accuracy_hist[default_acc_bin_idx]:.4f},",
-                    f"Loss Mean: {loss_mean:.5f},",
-                    f"Loss (last batch): {loss:.5f}")
+                    f"Loss Epoch: {loss_epoch:.5f},",
+                    f"Loss Batch: {loss:.5f}")
 
                 # Plot accuracy histogram
                 for i, rect in enumerate(rects):
@@ -161,7 +161,7 @@ def main():
 
                 loss_text.set_text(f"Epoch: {epoch} "
                     f"Step: {step + 1}, " +
-                    f"Loss Mean: {loss_mean:.4f}, " +
+                    f"Loss Epoch: {loss_epoch:.4f}, " +
                     f"Loss Batch: {loss:.4f}")
                 # moviewriter.grab_frame()
                 plt.draw()
