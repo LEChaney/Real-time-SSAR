@@ -24,6 +24,7 @@ accuracy_bins = 10
 grad_accum_steps = 4
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
+mode = 'training'
 
 def main():
     # Config
@@ -51,12 +52,18 @@ def main():
                                                                     dataset_len=len(dataset),
                                                                     train_fraction=0.6,
                                                                     validation_fraction=0.2)
+    if mode == 'training':
+        loader_indices = train_indices
+    elif mode == 'validation':
+        loader_indices = val_indices
+    else:
+        loader_indices = test_indices
     train_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
         num_workers=8,
         pin_memory=True,
-        sampler=FixedIndicesSampler(train_indices),
+        sampler=FixedIndicesSampler(loader_indices),
         collate_fn=collate_fn_padd)
     # val_loader = torch.utils.data.DataLoader(
     #     dataset,
@@ -82,17 +89,30 @@ def main():
 
     # Freeze parts of model we don't want to train
     model.eval()
-    model.lstms.train()
     dfs_freeze(model)
-    dfs_freeze(model.lstms, unfreeze=True)
+    if mode == 'training':
+        model.lstms.train()
+        dfs_freeze(model.lstms, unfreeze=True)
 
     # Setup optimizer and loss
     criterion = torch.nn.CrossEntropyLoss()
     criterion = criterion.cuda()
-    optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=2e-3)
+    if mode == 'training':
+        optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=2e-3)
+    else:
+        optimizer = None
 
     # Continue from previous training checkpoint
     epoch_resume, step_resume = load_latest(model, results_path, optimizer)
+
+    # Train / test / val setup
+    if mode != 'training':
+        epoch_resume = 0
+        step_resume = 0
+        epochs = 1
+        saving_enabled = False
+    else:
+        saving_enabled = True
 
     # old_tensor_set = set()
 
@@ -109,7 +129,8 @@ def main():
     # moviewriter.setup(fig, os.path.join(results_path, 'accuracy_over_time.mp4'), dpi=100)
 
     # Main training loop
-    optimizer.zero_grad()
+    if mode == 'training':
+        optimizer.zero_grad()
     for epoch in range(epoch_resume, epochs):
         # Display info
         print(f"Epoch: {epoch}")
@@ -130,7 +151,7 @@ def main():
                 continue
 
             # Save model
-            if step % 100 == 0 and (step != step_resume or epoch != epoch_resume):
+            if saving_enabled and step % 100 == 0 and (step != step_resume or epoch != epoch_resume):
                 save_model(model, optimizer, epoch, step, results_path)
 
             # Do one training step (may not actually step optimizer if doing gradiant accumulation)
@@ -168,8 +189,10 @@ def main():
                 plt.pause(0.001)
             
     # Save final model
-    if step != step_resume or epoch != epoch_resume:
+    if saving_enabled and step != step_resume or epoch != epoch_resume:
         save_model(model, optimizer, epoch, step, results_path)
+    plt.ioff()
+    plt.show()
 
 # Perfom one training step on one batch of data (may not actually step optimizer if doing gradiant accumulation)
 def train_step(model, step, sample, criterion, optimizer):
@@ -189,9 +212,10 @@ def train_step(model, step, sample, criterion, optimizer):
     # labels = labels.gather(1, indices).squeeze(1)
 
     loss = criterion(generated_labels, labels) / grad_accum_steps
-    loss.backward()
+    if mode == 'training':
+        loss.backward()
     
-    if (step + 1) % grad_accum_steps == 0:
+    if mode == 'training' and (step + 1) % grad_accum_steps == 0:
         optimizer.step()
         optimizer.zero_grad()
 

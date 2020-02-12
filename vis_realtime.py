@@ -119,7 +119,7 @@ def test_on_video(video_path, detector, classifier, opt):
 
             # Toggle classifier using detector
             if y_hat_det > 0.5:
-                mask, y_hat_clf, lstm_hidden = classifier(inputs_clf, lstm_hidden, get_mask=True)
+                mask, y_hat_clf, lstm_hidden = classifier(inputs_clf, lstm_hidden, get_mask=True, get_lstm_state=True)
                 mask = (mask[0][0].cpu().numpy() + 127) / 255
                 cv2.imshow('mask', mask)
                 y_hat_clf = y_hat_clf.squeeze(dim=0)
@@ -185,6 +185,11 @@ if __name__ == "__main__":
     state = classifier.state_dict()
     state.update(torch.load(classifier_weights))
     classifier.load_state_dict(state)
+    # if opt.resume_path_clf:
+    opt.resume_path_clf = './ssar/results/ssar_save_67_0.pth'
+    print('loading checkpoint {}'.format(opt.resume_path_clf))
+    checkpoint = torch.load(opt.resume_path_clf)
+    classifier.load_state_dict(checkpoint['state_dict'])
     classifier.eval()
 
-    test_on_video('../EgoGesture/Subject03/Scene4/Color/rgb2.avi', detector, classifier, opt)
+    test_on_video('../VID_20200131_115803.mp4', detector, classifier, opt)

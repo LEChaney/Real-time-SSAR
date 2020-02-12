@@ -118,23 +118,16 @@ def generate_model(opt):
         return model, parameters
 
     else:
-        if opt.model == 'ssar':
-            if opt.pretrain_path:
-                print('loading pretrained model {}'.format(opt.pretrain_path))
-                state = model.state_dict()
-                state.update(torch.load(opt.pretrain_path))
-
-                model.load_state_dict(state)
-
-            parameters = model.parameters()
-            return model, parameters
-
         if opt.pretrain_path:
             print('loading pretrained model {}'.format(opt.pretrain_path))
             pretrain = torch.load(opt.pretrain_path)
             assert opt.arch == pretrain['arch']
 
             model.load_state_dict(pretrain['state_dict'])
+        
+        if opt.model == 'ssar':
+            parameters = model.parameters()
+            return model, parameters
 
         if opt.modality == 'RGB' and opt.model != 'c3d':
             print("[INFO]: RGB model is used for init model")
