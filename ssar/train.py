@@ -20,23 +20,25 @@ import os
 # import torch
 # import gc
 
+results_path = 'results'
+mode = 'training'
+batch_size = 25
+epochs = 100
+default_acc_bin_idx = 8
+fast_forward_step = False
 accuracy_bins = 10
 grad_accum_steps = 4
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
-mode = 'testing'
 
 def main():
+    global epochs
+
     # Config
     parser = argparse.ArgumentParser(description="To read EgoGesture Dataset and run through SSAR network")
     parser.add_argument('--path', default='', help='full path to EgoGesture Dataset')
     args = parser.parse_args()
     path = args.path
-    results_path = 'results'
-    batch_size = 25
-    epochs = 100
-    default_acc_bin_idx = 8
-    fast_forward_step = True
 
     # Setup datasets / dataloaders
     image_transform = transforms.Compose([transforms.Resize((126, 224)),
@@ -65,12 +67,12 @@ def main():
         pin_memory=True,
         sampler=FixedIndicesSampler(loader_indices),
         collate_fn=collate_fn_padd)
-    # val_loader = torch.utils.data.DataLoader(
-    #     dataset,
-    #     batch_size=batch_size,
-    #     num_workers=0,
-    #     pin_memory=True,
-    #     sampler=FixedIndicesSampler(val_indices))
+    val_loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=8,
+        pin_memory=True,
+        sampler=FixedIndicesSampler(val_indices))
     # test_loader = torch.utils.data.DataLoader(
     #     dataset,
     #     batch_size=batch_size,
@@ -104,6 +106,8 @@ def main():
 
     # Continue from previous training checkpoint
     epoch_resume, step_resume = load_latest(model, results_path, optimizer)
+    if not fast_forward_step:
+        step_resume = 0
 
     # Train / test / val setup
     if mode != 'training':
@@ -115,10 +119,10 @@ def main():
 
     # Accuracy bar plot
     plt.ion()
-    fig = plt.figure()
-    rects = plt.bar(rel_poses, 1, 1 / accuracy_bins)
-    texts = [plt.text(x, y, "1.0", horizontalalignment='center', verticalalignment='bottom') for x, y in zip(rel_poses, np.ones_like(rel_poses))]
-    loss_text = plt.text(0, -0.1, "Loss: ")
+    fig, ax = plt.subplots(nrows=2, ncols=1)
+    rects = ax[0].bar(rel_poses, 1, 1 / accuracy_bins)
+    texts = [ax[0].text(x, y, "1.0", horizontalalignment='center', verticalalignment='bottom') for x, y in zip(rel_poses, np.ones_like(rel_poses))]
+    loss_text = ax[1].text(0, -0.2, "Loss: ")
     plt.show()
 
     # Setup movie moviewriter for writing accuracy plot over time
@@ -128,23 +132,22 @@ def main():
     # Main training loop
     if mode == 'training':
         optimizer.zero_grad()
+    train_history = {}
     for epoch in range(epoch_resume, epochs):
         # Display info
         print(f"Epoch: {epoch}")
 
-        if fast_forward_step == True and epoch == epoch_resume and step_resume > 0:
+        if epoch == epoch_resume and step_resume > 0:
             print(f"Fast forwarding to train step {step_resume}")
         
         # Reset epoch stats
-        correct_count_samples = np.array([0] * accuracy_bins)
-        gesture_count = 0
-        loss_sum = 0
-        losses_seen = 0
+        metrics = {}
 
-        for step, sample in enumerate(train_loader):
+        # Train
+        for step, batch in enumerate(train_loader):
             # Advance train_loader to resume training from last checkpointed position (Note: Assumes same batch size)
-            if fast_forward_step == True and epoch == epoch_resume and step < step_resume:
-                del sample
+            if epoch == epoch_resume and step < step_resume:
+                del batch
                 continue
 
             # Save model
@@ -152,38 +155,49 @@ def main():
                 save_model(model, optimizer, epoch, step, results_path)
 
             # Do one training step (may not actually step optimizer if doing gradiant accumulation)
-            loss, batch_correct_count_samples = train_step(model, step, sample, criterion, optimizer)
-            del sample
+            loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer)
+            del batch
             
             # Stats
-            gesture_count += batch_size
-            loss_sum += loss
-            losses_seen += 1
-            correct_count_samples += batch_correct_count_samples
-            loss_epoch = loss_sum / losses_seen
-            accuracy_hist = correct_count_samples / gesture_count
+            update_metrics(metrics, epoch, loss, batch_correct_count_samples)
 
             if (step + 1) % 10 == 0:
                 print(f"Step: {step + 1},",
-                    f"Processed Gestures: {gesture_count},",
-                    f"Correct Count (@t={rel_poses[default_acc_bin_idx]:.2f}): {correct_count_samples[default_acc_bin_idx]},",
-                    f"Accuracy (@t={rel_poses[default_acc_bin_idx]:.2f}): {accuracy_hist[default_acc_bin_idx]:.4f},",
-                    f"Loss Epoch: {loss_epoch:.5f},",
+                    f"Processed Gestures: {metrics['gesture_count']},",
+                    f"Correct Count (@t={rel_poses[default_acc_bin_idx]:.2f}): {metrics['correct_count_hist'][default_acc_bin_idx]},",
+                    f"Accuracy (@t={rel_poses[default_acc_bin_idx]:.2f}): {metrics['accuracy_hist'][default_acc_bin_idx]:.4f},",
+                    f"Loss Epoch: {metrics['loss_epoch']:.5f},",
                     f"Loss Batch: {loss:.5f}")
 
                 # Plot accuracy histogram
                 for i, rect in enumerate(rects):
-                    rect.set_height(accuracy_hist[i])
-                    texts[i].set_position([rel_poses[i], accuracy_hist[i]])
-                    texts[i].set_text(f'{accuracy_hist[i]:.3f}')
+                    rect.set_height(metrics['accuracy_hist'][i])
+                    texts[i].set_position([rel_poses[i], metrics['accuracy_hist'][i]])
+                    texts[i].set_text(f'{metrics["accuracy_hist"][i]:.3f}')
 
                 loss_text.set_text(f"Epoch: {epoch} "
                     f"Step: {step + 1}, " +
-                    f"Loss Epoch: {loss_epoch:.4f}, " +
+                    f"Loss Epoch: {metrics['loss_epoch']:.4f}, " +
                     f"Loss Batch: {loss:.4f}")
                 # moviewriter.grab_frame()
                 plt.draw()
                 plt.pause(0.001)
+        
+            update_metric_history(train_history, metrics)
+
+        try:
+            train_loss_line.set_data(train_history['epoch'], train_history['loss_epoch'])
+            ax[1].relim()
+            ax[1].autoscale_view()
+        except NameError:
+            train_loss_line, = ax[1].plot(train_history['epoch'], train_history['loss_epoch'])
+
+        plt.draw()
+        plt.pause(0.001)
+
+        # Validation
+        # for step, batch in enumerate(val_loader):
+        #     loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer)
             
     # Save final model
     if mode == 'training' and step != step_resume or epoch != epoch_resume:
@@ -194,14 +208,43 @@ def main():
     plt.ioff()
     plt.show()
 
+def update_metric_history(history, metrics):
+    for key in metrics:
+        metric = np.expand_dims(metrics[key], axis=0)
+        if key not in history:
+            history[key] = np.zeros((0,) + metric.shape[1:])
+        history[key] = np.concatenate([history[key], metric], axis=0)
+    
+    return history
+
+def update_metrics(metrics, epoch, loss, batch_correct_count_samples):
+    if 'gesture_count' not in metrics:
+        metrics['gesture_count'] = 0
+    if 'loss_sum' not in metrics:
+        metrics['loss_sum'] = 0
+    if 'losses_seen' not in metrics:
+        metrics['losses_seen'] = 0
+    if 'correct_count_hist' not in metrics:
+        metrics['correct_count_hist'] = np.array([0] * accuracy_bins)
+
+    metrics['epoch'] = epoch
+    metrics['gesture_count'] += batch_size
+    metrics['loss_sum'] += loss
+    metrics['losses_seen'] += 1
+    metrics['correct_count_hist'] += batch_correct_count_samples
+    metrics['loss_epoch'] = metrics['loss_sum'] / metrics['losses_seen']
+    metrics['accuracy_hist'] = metrics['correct_count_hist'] / metrics['gesture_count']
+
+    return metrics
+
 # Perfom one training step on one batch of data (may not actually step optimizer if doing gradiant accumulation)
-def train_step(model, step, sample, criterion, optimizer):
-    images = sample['images']
+def process_batch(model, step, batch, criterion, optimizer):
+    images = batch['images']
 
     images = images.cuda()
-    labels = pad_packed_sequence(sample['label'], batch_first=True)[0].cuda()
-    lengths = sample['length'].cuda()
-    # true_mask = sample['masks']
+    labels = pad_packed_sequence(batch['label'], batch_first=True)[0].cuda()
+    lengths = batch['length'].cuda()
+    # true_mask = batch['masks']
 
     generated_labels = model(images, lengths=lengths, get_mask=False, get_lstm_state=False)
 
@@ -235,7 +278,7 @@ def train_step(model, step, sample, criterion, optimizer):
         generated_labels = torch.argmax(generated_labels, dim=1)
         indices = end_indices
         labels = labels.gather(1, indices)
-        correct_count_samples = torch.sum(labels == generated_labels, axis=0).cpu().numpy()
+        correct_count_hist = torch.sum(labels == generated_labels, axis=0).cpu().numpy()
 
         # if count == 0:
         #     im_plt = plt.imshow(masks[0, lengths[0] // 2, 1].cpu())
@@ -243,7 +286,7 @@ def train_step(model, step, sample, criterion, optimizer):
         #     im_plt.set_data(masks[0, lengths[0] // 2, 1].cpu())
         # plt.draw()
         # plt.pause(0.0001)
-        return loss.item() * grad_accum_steps, correct_count_samples
+        return loss.item() * grad_accum_steps, correct_count_hist
 
     # cur_tensor_set = set()
     # for obj in gc.get_objects():
