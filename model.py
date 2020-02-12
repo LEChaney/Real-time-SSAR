@@ -64,20 +64,6 @@ def generate_model(opt):
                 num_classes=opt.n_classes)
     
     if not opt.no_cuda:
-        if opt.model == 'ssar':
-            if opt.pretrain_path:
-                print('loading pretrained model {}'.format(opt.pretrain_path))
-                state = model.state_dict()
-                state.update(torch.load(opt.pretrain_path))
-
-                model.load_state_dict(state)
-
-            # model = nn.DataParallel(model, device_ids=None)
-            model = model.cuda()
-
-            parameters = model.parameters()
-            return model, parameters
-            
         if opt.pretrain_path:
             print('loading pretrained model {}'.format(opt.pretrain_path))
             pretrain = torch.load(opt.pretrain_path)
@@ -85,6 +71,12 @@ def generate_model(opt):
 
             model.load_state_dict(pretrain['state_dict'])
 
+        if opt.model == 'ssar':
+            # model = nn.DataParallel(model, device_ids=None)
+            model = model.cuda()
+
+            parameters = model.parameters()
+            return model, parameters
     
         if opt.modality == 'RGB' and opt.model != 'c3d':
             print("[INFO]: RGB model is used for init model")

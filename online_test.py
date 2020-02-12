@@ -73,7 +73,6 @@ def load_models(opt):
     detector, parameters = generate_model(opt)
 
     if opt.resume_path:
-        opt.resume_path = os.path.join(opt.root_path, opt.resume_path)
         print('loading checkpoint {}'.format(opt.resume_path))
         checkpoint = torch.load(opt.resume_path)
         assert opt.arch == checkpoint['arch']
@@ -109,7 +108,10 @@ def load_models(opt):
     opt.scales = [opt.initial_scale]
     for i in range(1, opt.n_scales):
         opt.scales.append(opt.scales[-1] * opt.scale_step)
-    opt.arch = '{}-{}'.format(opt.model, opt.model_depth)
+    if opt.model == 'ssar':
+        opt.arch = opt.model
+    else:
+        opt.arch = '{}-{}'.format(opt.model, opt.model_depth)
     opt.mean = get_mean(opt.norm_value)
     opt.std = get_std(opt.norm_value)
 
@@ -122,16 +124,10 @@ def load_models(opt):
 
     if opt.resume_path:
         print('loading pretrained model {}'.format(opt.pretrain_path))
-        if opt.model == 'ssar':
-            state = classifier.state_dict()
-            state.update(torch.load(opt.resume_path))
+        checkpoint = torch.load(opt.resume_path)
+        assert opt.arch == checkpoint['arch']
 
-            classifier.load_state_dict(state)
-        else:
-            checkpoint = torch.load(opt.resume_path)
-            assert opt.arch == checkpoint['arch']
-
-            classifier.load_state_dict(checkpoint['state_dict'])
+        classifier.load_state_dict(checkpoint['state_dict'])
 
     print('Model 2 \n', classifier)
     pytorch_total_params = sum(p.numel() for p in classifier.parameters() if
@@ -187,21 +183,21 @@ def main():
             test_paths.append(os.path.join(opt.video_path, x.replace('path:', ''), 'sk_color_all').replace(os.sep, '/'))
 
     # Figures setup
-    fig, ax = plt.subplots(nrows=6, ncols=1)
+    # fig, ax = plt.subplots(nrows=6, ncols=1)
 
-    x_data, y_datas = [], []
-    lines = []
-    for j in range(6):
-        if j != 0:
-            ax[j].set_xlim(0, 400)
-            ax[j].set_ylim(0, 1)
-        y_datas.append([])
-        lines.append([])
-        for _ in range(opt.n_classes_clf):
-            y_data = []
-            y_datas[j].append(y_data)
-            line, = ax[j].plot(x_data, y_data)
-            lines[j].append(line)
+    # x_data, y_datas = [], []
+    # lines = []
+    # for j in range(6):
+    #     if j != 0:
+    #         ax[j].set_xlim(0, 400)
+    #         ax[j].set_ylim(0, 1)
+    #     y_datas.append([])
+    #     lines.append([])
+    #     for _ in range(opt.n_classes_clf):
+    #         y_data = []
+    #         y_datas[j].append(y_data)
+    #         line, = ax[j].plot(x_data, y_data)
+    #         lines[j].append(line)
 
     print('Start Evaluation')
     detector.eval()
@@ -209,7 +205,7 @@ def main():
 
     levenshtein_accuracies = AverageMeter()
     videoidx = 0
-    for path in test_paths[7:]:
+    for path in test_paths[4:]:
         path = os.path.normpath(path)
         if opt.dataset == 'egogesture':
             opt.whole_path = path.rsplit(os.sep, 4)[-4:]
@@ -310,7 +306,7 @@ def main():
                         elif opt.modality_clf =='RGB-D':
                             inputs_clf = inputs_clf[:,:,-1,:,:]
 
-                        outputs_clf, lstm_hidden = classifier(inputs_clf, lstm_hidden)
+                        outputs_clf, lstm_hidden = classifier(inputs_clf, lstm_hidden, get_lstm_state=True)
                     else:
                         if opt.modality_clf == 'RGB':
                             inputs_clf = inputs[:,:3,:,:,:]
@@ -369,28 +365,28 @@ def main():
                 active_index = 0
 
             # Visualize
-            x_data.append(i)
-            y_datas[1][0].append(prob_det)
-            lines[1][0].set_xdata(x_data)
-            lines[1][0].set_ydata(y_datas[1][0])
-            for j in range(opt.n_classes_clf):
-                y_datas[2][j].append(cum_sum[j])
-                y_datas[3][j].append(cum_sum_unweighted[j])
-                y_datas[4][j].append(clf_selected_queue[j] if active else 0)
-                for k in range(2, 5):
-                    lines[k][j].set_xdata(x_data)
-                    lines[k][j].set_ydata(y_datas[k][j])
-            for k in range(1, 6):
-                ax[k].set_xlim(i - 400, i)
-            mean = np.array(opt.mean, dtype=np.float32).reshape(1, 1, -1)
-            img = inputs_det[0, :, -1].permute(1, 2, 0).cpu().numpy() + mean
-            img = img.astype(int)
-            if i == 0:
-                im_plt = ax[0].imshow(img)
-            else:
-                im_plt.set_data(img)
-            plt.draw()
-            plt.pause(0.001)
+            # x_data.append(i)
+            # y_datas[1][0].append(prob_det)
+            # lines[1][0].set_xdata(x_data)
+            # lines[1][0].set_ydata(y_datas[1][0])
+            # for j in range(opt.n_classes_clf):
+            #     y_datas[2][j].append(cum_sum[j])
+            #     y_datas[3][j].append(cum_sum_unweighted[j])
+            #     y_datas[4][j].append(clf_selected_queue[j] if active else 0)
+            #     for k in range(2, 5):
+            #         lines[k][j].set_xdata(x_data)
+            #         lines[k][j].set_ydata(y_datas[k][j])
+            # for k in range(1, 6):
+            #     ax[k].set_xlim(i - 400, i)
+            # mean = np.array(opt.mean, dtype=np.float32).reshape(1, 1, -1)
+            # img = inputs_det[0, :, -1].permute(1, 2, 0).cpu().numpy() + mean
+            # img = img.astype(int)
+            # if i == 0:
+            #     im_plt = ax[0].imshow(img)
+            # else:
+            #     im_plt.set_data(img)
+            # plt.draw()
+            # plt.pause(0.001)
 
             if active == False and  prev_active == True:
                 finished_prediction = True
