@@ -24,7 +24,7 @@ accuracy_bins = 10
 grad_accum_steps = 4
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
-mode = 'training'
+mode = 'testing'
 
 def main():
     # Config
@@ -110,9 +110,6 @@ def main():
         epoch_resume = 0
         step_resume = 0
         epochs = 1
-        saving_enabled = False
-    else:
-        saving_enabled = True
 
     # old_tensor_set = set()
 
@@ -151,7 +148,7 @@ def main():
                 continue
 
             # Save model
-            if saving_enabled and step % 100 == 0 and (step != step_resume or epoch != epoch_resume):
+            if mode == 'training' and step % 100 == 0 and (step != step_resume or epoch != epoch_resume):
                 save_model(model, optimizer, epoch, step, results_path)
 
             # Do one training step (may not actually step optimizer if doing gradiant accumulation)
@@ -189,8 +186,11 @@ def main():
                 plt.pause(0.001)
             
     # Save final model
-    if saving_enabled and step != step_resume or epoch != epoch_resume:
+    if mode == 'training' and step != step_resume or epoch != epoch_resume:
         save_model(model, optimizer, epoch, step, results_path)
+    
+    print('Done!')
+    
     plt.ioff()
     plt.show()
 
