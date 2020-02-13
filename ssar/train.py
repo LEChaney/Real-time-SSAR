@@ -25,9 +25,10 @@ mode = 'training'
 batch_size = 25
 epochs = 100
 default_acc_bin_idx = 8
-fast_forward_step = False
+fast_forward_step = True
 accuracy_bins = 10
 grad_accum_steps = 4
+early_stoppping_patience = 1 # Number of epochs that validation accuracy doesn't improve before stopping
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
 
@@ -72,13 +73,15 @@ def main():
         batch_size=batch_size,
         num_workers=8,
         pin_memory=True,
-        sampler=FixedIndicesSampler(val_indices))
+        sampler=FixedIndicesSampler(val_indices),
+        collate_fn=collate_fn_padd)
     # test_loader = torch.utils.data.DataLoader(
     #     dataset,
     #     batch_size=batch_size,
-    #     num_workers=0,
+    #     num_workers=8,
     #     pin_memory=True,
-    #     sampler=FixedIndicesSampler(test_indices))
+    #     sampler=FixedIndicesSampler(test_indices),
+    #     collate_fn=collate_fn_padd)
 
     # Init model and load pre-trained weights
     rnet = resnet.resnet18(False)
@@ -105,7 +108,7 @@ def main():
         optimizer = None
 
     # Continue from previous training checkpoint
-    epoch_resume, step_resume = load_latest(model, results_path, optimizer)
+    epoch_resume, step_resume, best_val_loss = load_latest(model, results_path, optimizer)
     if not fast_forward_step:
         step_resume = 0
 
@@ -119,10 +122,19 @@ def main():
 
     # Accuracy bar plot
     plt.ion()
-    fig, ax = plt.subplots(nrows=2, ncols=1)
-    rects = ax[0].bar(rel_poses, 1, 1 / accuracy_bins)
-    texts = [ax[0].text(x, y, "1.0", horizontalalignment='center', verticalalignment='bottom') for x, y in zip(rel_poses, np.ones_like(rel_poses))]
-    loss_text = ax[1].text(0, -0.2, "Loss: ")
+    fig, ax = plt.subplots(nrows=3, ncols=1, figsize=(10, 7), dpi=100)
+    train_acc_bars   = ax[0].bar(rel_poses, 0, 1 / accuracy_bins)
+    val_acc_bars     = ax[1].bar(rel_poses, 0, 1 / accuracy_bins)
+    train_loss_line, = ax[2].plot([], [], label='Train Loss')
+    val_loss_line,   = ax[2].plot([], [], label='Val Loss')
+    train_acc_texts  = [ax[0].text(x, y, "", horizontalalignment='center', verticalalignment='bottom') for x, y in zip(rel_poses, np.ones_like(rel_poses))]
+    val_acc_texts    = [ax[1].text(x, y, "", horizontalalignment='center', verticalalignment='bottom') for x, y in zip(rel_poses, np.ones_like(rel_poses))]
+    ax[0].set_ylim(0., 1.1)
+    ax[0].set_title('Relative Gesture Position vs Training Accuracy')
+    ax[1].set_ylim(0., 1.1)
+    ax[1].set_title('Relative Gesture Position vs Validation Accuracy')
+    ax[2].legend(loc='best')
+    # loss_text = ax[2].text(0, -0.2, "Loss: ")
     plt.show()
 
     # Setup movie moviewriter for writing accuracy plot over time
@@ -133,6 +145,7 @@ def main():
     if mode == 'training':
         optimizer.zero_grad()
     train_history = {}
+    val_history = {}
     for epoch in range(epoch_resume, epochs):
         # Display info
         print(f"Epoch: {epoch}")
@@ -141,9 +154,11 @@ def main():
             print(f"Fast forwarding to train step {step_resume}")
         
         # Reset epoch stats
-        metrics = {}
+        train_metrics = {}
 
         # Train
+        if mode == 'training':
+            print('Training:')
         for step, batch in enumerate(train_loader):
             # Advance train_loader to resume training from last checkpointed position (Note: Assumes same batch size)
             if epoch == epoch_resume and step < step_resume:
@@ -152,63 +167,91 @@ def main():
 
             # Save model
             if mode == 'training' and step % 100 == 0 and (step != step_resume or epoch != epoch_resume):
-                save_model(model, optimizer, epoch, step, results_path)
+                save_model(model, optimizer, epoch, step, best_val_loss, results_path)
 
             # Do one training step (may not actually step optimizer if doing gradiant accumulation)
-            loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer)
+            loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer, mode='training')
             del batch
             
-            # Stats
-            update_metrics(metrics, epoch, loss, batch_correct_count_samples)
+            # Update metrics
+            update_metrics(train_metrics, epoch, loss, batch_correct_count_samples)
 
             if (step + 1) % 10 == 0:
-                print(f"Step: {step + 1},",
-                    f"Processed Gestures: {metrics['gesture_count']},",
-                    f"Correct Count (@t={rel_poses[default_acc_bin_idx]:.2f}): {metrics['correct_count_hist'][default_acc_bin_idx]},",
-                    f"Accuracy (@t={rel_poses[default_acc_bin_idx]:.2f}): {metrics['accuracy_hist'][default_acc_bin_idx]:.4f},",
-                    f"Loss Epoch: {metrics['loss_epoch']:.5f},",
-                    f"Loss Batch: {loss:.5f}")
-
-                # Plot accuracy histogram
-                for i, rect in enumerate(rects):
-                    rect.set_height(metrics['accuracy_hist'][i])
-                    texts[i].set_position([rel_poses[i], metrics['accuracy_hist'][i]])
-                    texts[i].set_text(f'{metrics["accuracy_hist"][i]:.3f}')
-
-                loss_text.set_text(f"Epoch: {epoch} "
-                    f"Step: {step + 1}, " +
-                    f"Loss Epoch: {metrics['loss_epoch']:.4f}, " +
-                    f"Loss Batch: {loss:.4f}")
-                # moviewriter.grab_frame()
-                plt.draw()
-                plt.pause(0.001)
+                # Display metrics
+                print_metrics(train_metrics, step)
+                update_accuracy_plot(train_acc_bars, train_acc_texts, train_metrics['accuracy_hist'])
         
-            update_metric_history(train_history, metrics)
-
-        try:
-            train_loss_line.set_data(train_history['epoch'], train_history['loss_epoch'])
-            ax[1].relim()
-            ax[1].autoscale_view()
-        except NameError:
-            train_loss_line, = ax[1].plot(train_history['epoch'], train_history['loss_epoch'])
-
-        plt.draw()
-        plt.pause(0.001)
-
+        # Update train metric history and plots for this epoch
+        update_epoch_history(train_history, train_metrics)
+        update_loss_plot(train_loss_line, train_history)
+        
         # Validation
-        # for step, batch in enumerate(val_loader):
-        #     loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer)
+        if mode == 'training':
+            print('Validation:')
+            val_metrics = {}
+            for step, batch in enumerate(val_loader):
+                loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer, mode='validation')
+
+                # Update metrics
+                update_metrics(val_metrics, epoch, loss, batch_correct_count_samples)
+
+                if (step + 1) % 10 == 0:
+                    # Display metrics
+                    print_metrics(val_metrics, step)
+                    update_accuracy_plot(val_acc_bars, val_acc_texts, val_metrics['accuracy_hist'])
             
+            # Update validation metric history and plots
+            update_epoch_history(val_history, val_metrics)
+            update_loss_plot(val_loss_line, val_history)
+
+            # Early stoping
+            if val_metrics['loss_epoch'] < best_val_loss:
+                best_val_loss = val_metrics['loss_epoch']
+                patience_counter = 0
+                save_model(model, optimizer, epoch, step, best_val_loss, results_path, filename_override='model_best.pth')
+            else:
+                patience_counter += 1
+            if patience_counter >= early_stoppping_patience:
+                print(f'Validation accuracy did not improve for {patience_counter} epochs, stopping')
+                break
+
     # Save final model
     if mode == 'training' and step != step_resume or epoch != epoch_resume:
-        save_model(model, optimizer, epoch, step, results_path)
+        save_model(model, optimizer, epoch, step, best_val_loss, results_path)
     
     print('Done!')
     
     plt.ioff()
     plt.show()
 
-def update_metric_history(history, metrics):
+def update_loss_plot(loss_line, history):
+    loss_line.set_data(history['epoch'], history['loss_epoch'])
+    ax = loss_line.axes
+    ax.relim()
+    ax.autoscale_view()
+
+    plt.draw()
+    plt.pause(0.001)
+
+def print_metrics(metrics, step):
+    print(f"Step: {step + 1},",
+          f"Processed Gestures: {metrics['gesture_count']},",
+          f"Correct Count (@t={rel_poses[default_acc_bin_idx]:.2f}): {metrics['correct_count_hist'][default_acc_bin_idx]},",
+          f"Accuracy (@t={rel_poses[default_acc_bin_idx]:.2f}): {metrics['accuracy_hist'][default_acc_bin_idx]:.4f},",
+          f"Loss Epoch: {metrics['loss_epoch']:.5f},",
+          f"Loss Last Batch: {metrics['loss_last_batch']:.5f}")
+
+def update_accuracy_plot(rects, texts, accuracy_hist):
+    # Plot accuracy histogram
+    for i, rect in enumerate(rects):
+        rect.set_height(accuracy_hist[i])
+        texts[i].set_position([rel_poses[i], accuracy_hist[i]])
+        texts[i].set_text(f'{accuracy_hist[i]:.3f}')
+
+    plt.draw()
+    plt.pause(0.001)
+
+def update_epoch_history(history, metrics):
     for key in metrics:
         metric = np.expand_dims(metrics[key], axis=0)
         if key not in history:
@@ -232,13 +275,14 @@ def update_metrics(metrics, epoch, loss, batch_correct_count_samples):
     metrics['loss_sum'] += loss
     metrics['losses_seen'] += 1
     metrics['correct_count_hist'] += batch_correct_count_samples
+    metrics['loss_last_batch'] = loss
     metrics['loss_epoch'] = metrics['loss_sum'] / metrics['losses_seen']
     metrics['accuracy_hist'] = metrics['correct_count_hist'] / metrics['gesture_count']
 
     return metrics
 
 # Perfom one training step on one batch of data (may not actually step optimizer if doing gradiant accumulation)
-def process_batch(model, step, batch, criterion, optimizer):
+def process_batch(model, step, batch, criterion, optimizer, mode='training'):
     images = batch['images']
 
     images = images.cuda()
