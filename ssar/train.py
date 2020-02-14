@@ -23,7 +23,7 @@ import os
 results_path = 'results'
 mode = 'training'
 batch_size = 25
-epochs = 100
+epochs = 1000
 default_acc_bin_idx = 8
 fast_forward_step = True
 accuracy_bins = 10
