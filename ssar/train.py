@@ -171,7 +171,7 @@ def main():
                 save_model(model, optimizer, epoch, step, best_val_loss, results_path)
 
             # Do one training step (may not actually step optimizer if doing gradiant accumulation)
-            loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer, mode='training')
+            loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer, mode=mode)
             del batch
             
             # Update metrics
@@ -185,6 +185,8 @@ def main():
         # Update train metric history and plots for this epoch
         update_epoch_history(train_history, train_metrics)
         update_loss_plot(train_loss_line, train_history)
+        
+        last_step_train = step
         
         # Validation
         if mode == 'training':
@@ -215,6 +217,8 @@ def main():
             if patience_counter >= early_stoppping_patience:
                 print(f'Validation accuracy did not improve for {patience_counter} epochs, stopping')
                 break
+
+        step = last_step_train
 
     # Save final model
     if mode == 'training' and step != step_resume or epoch != epoch_resume:
