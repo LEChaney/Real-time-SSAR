@@ -166,6 +166,7 @@ class SSAR(nn.Module):
             if packed_seq is not None:
                 mask = PackedSequence(mask, packed_seq.batch_sizes, packed_seq.sorted_indices, packed_seq.unsorted_indices)
                 mask, _ = pad_packed_sequence(sequence=mask, batch_first=True)
+            mask = mask.permute(0, 2, 1, 3, 4)
             outputs.append(mask)
 
         outputs.append(label)

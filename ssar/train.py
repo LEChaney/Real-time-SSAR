@@ -7,7 +7,7 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, PackedSequence
-from utils import dfs_freeze, save_model, load_latest
+from utils import dfs_freeze, save_model, load_latest, set_bn_train_mode
 from matplotlib.animation import FFMpegWriter
 
 import matplotlib.pyplot as plt
@@ -21,17 +21,23 @@ import os
 # import gc
 
 results_path = 'results'
-mode = 'training'
-batch_size = 25
+mode = 'testing'
+training_mode = 'end-to-end' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
+use_mask_loss = True # Should be True for end-to-end or embedding training
+batch_size = 1
 epochs = 1000
 default_acc_bin_idx = 8
 fast_forward_step = True
 accuracy_bins = 10
-grad_accum_steps = 4
+grad_accum_steps = 1
 learning_rate = 1e-3
 early_stoppping_patience = 5 # Number of epochs that validation accuracy doesn't improve before stopping
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
+# Enable to update batch norm running means and variances (only set this if the batch size is large enough for accurate mean / var estimation)
+# Only applies in 'end-to-end' training mode
+enable_bn_mean_var_update = False
+
 
 def main():
     global epochs
@@ -50,7 +56,7 @@ def main():
     mask_transform = transforms.Compose([transforms.ToTensor()])
     hostname = gethostname() + "sequence_data"
 
-    dataset = EgoGestDataSequence(path, hostname, image_transform, mask_transform, get_mask=False)
+    dataset = EgoGestDataSequence(path, hostname, image_transform, mask_transform, get_mask=use_mask_loss)
     train_indices, val_indices, test_indices = check_and_split_data(host_name=hostname,
                                                                     data_folder=path,
                                                                     dataset_len=len(dataset),
@@ -94,11 +100,20 @@ def main():
     model.load_state_dict(state)
 
     # Freeze parts of model we don't want to train
-    model.eval()
-    dfs_freeze(model)
-    if mode == 'training':
-        model.lstms.train()
-        dfs_freeze(model.lstms, unfreeze=True)
+    if mode != 'training':
+        model.eval()
+    elif training_mode == 'lstm-only':
+        model.eval()
+        dfs_freeze(model)
+        if mode == 'training':
+            model.lstms.train()
+            dfs_freeze(model.lstms, unfreeze=True)
+    elif training_mode == 'end-to-end':
+        model.train()
+        dfs_freeze(model, unfreeze=True)
+
+        # Enable / Disable running mean variance update on batchnorm layers
+        set_bn_train_mode(model, train=enable_bn_mean_var_update)
 
     # Setup optimizer and loss
     criterion = torch.nn.CrossEntropyLoss()
@@ -293,9 +308,12 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
     images = images.cuda()
     labels = pad_packed_sequence(batch['label'], batch_first=True)[0].cuda()
     lengths = batch['length'].cuda()
-    # true_mask = batch['masks']
+    if use_mask_loss:
+        true_mask = pad_packed_sequence(batch['masks'], batch_first=True)[0].cuda()
 
-    generated_labels = model(images, lengths=lengths, get_mask=False, get_lstm_state=False)
+    generated_labels = model(images, lengths=lengths, get_mask=use_mask_loss, get_lstm_state=False)
+    if use_mask_loss:
+        mask, generated_labels = generated_labels
 
     # end_indices = (lengths - 1)
     # indices = end_indices.view(-1, 1, 1).repeat(1, generated_labels.shape[1], 1)
@@ -303,7 +321,12 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
     # indices = end_indices.view(-1, 1)
     # labels = labels.gather(1, indices).squeeze(1)
 
-    loss = criterion(generated_labels, labels) / grad_accum_steps
+    loss = criterion(generated_labels, labels)
+    if use_mask_loss:
+        loss += criterion(mask, true_mask)
+    loss /= grad_accum_steps
+
+
     if mode == 'training':
         loss.backward()
     
@@ -335,7 +358,7 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
         #     im_plt.set_data(masks[0, lengths[0] // 2, 1].cpu())
         # plt.draw()
         # plt.pause(0.0001)
-        return loss.item() * grad_accum_steps, correct_count_hist
+        return loss.item() * grad_accum_steps, correct_count_hist # Return undivided loss
 
     # cur_tensor_set = set()
     # for obj in gc.get_objects():

@@ -193,7 +193,7 @@ class EgoGestDataSequence(Dataset):
 
         images = torch.ones((num_images, 3, 126, 224))
         if self.get_mask:
-            masks = torch.ones(num_images, 126, 224)
+            masks = torch.ones(num_images, 126, 224).long()
         for i, image_name in enumerate(image_names):
             image = Image.open(image_name).convert("RGB").resize((224, 126), Image.BILINEAR)
             if self.image_transform:
@@ -208,6 +208,7 @@ class EgoGestDataSequence(Dataset):
                 if self.mask_transform:
                     mask = self.mask_transform(mask)
                     mask = torch.squeeze(mask)
+                mask = mask.long()
                 masks[i, :, :] = mask
                 
         label = torch.tensor([gesture[0]]).repeat([num_images])

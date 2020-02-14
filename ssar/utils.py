@@ -10,6 +10,16 @@ def dfs_freeze(model, unfreeze=False):
             param.requires_grad = unfreeze
         dfs_freeze(child, unfreeze=unfreeze)
 
+def set_bn_train_mode(model, train=True):
+    def _set_bn_train_mode(m):
+        classname = m.__class__.__name__
+        if classname.find('BatchNorm') != -1:
+            if train:
+                m.train()
+            else:
+                m.eval()
+    model.apply(_set_bn_train_mode)
+
 def get_date_sorted_chkpt_files(checkpoint_path):
     old_saves = glob.glob(os.path.join(checkpoint_path, 'ssar_save_*_*.pth'))
     old_saves.sort(key=os.path.getmtime)
