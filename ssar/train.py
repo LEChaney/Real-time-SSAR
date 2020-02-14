@@ -21,15 +21,15 @@ import os
 # import gc
 
 results_path = 'results'
-mode = 'testing'
-training_mode = 'end-to-end' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
-use_mask_loss = True # Should be True for end-to-end or embedding training
-batch_size = 1
+mode = 'training'
+training_mode = 'lstm-only' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
+use_mask_loss = False # Should be True for end-to-end or embedding training
+batch_size = 25
 epochs = 1000
 default_acc_bin_idx = 8
 fast_forward_step = True
 accuracy_bins = 10
-grad_accum_steps = 1
+grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
 early_stoppping_patience = 5 # Number of epochs that validation accuracy doesn't improve before stopping
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
@@ -183,7 +183,7 @@ def main():
 
             # Save model
             if mode == 'training' and step % 100 == 0 and (step != step_resume or epoch != epoch_resume):
-                save_model(model, optimizer, epoch, step, best_val_loss, results_path)
+                save_model(model, optimizer, training_mode, epoch, step, best_val_loss, results_path)
 
             # Do one training step (may not actually step optimizer if doing gradiant accumulation)
             loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer, mode=mode)
@@ -226,7 +226,7 @@ def main():
             if val_metrics['loss_epoch'] < best_val_loss:
                 best_val_loss = val_metrics['loss_epoch']
                 patience_counter = 0
-                save_model(model, optimizer, epoch, step, best_val_loss, results_path, filename_override='model_best.pth')
+                save_model(model, optimizer, training_mode, epoch, step, best_val_loss, results_path, filename_override='model_best.pth')
             else:
                 patience_counter += 1
             if patience_counter >= early_stoppping_patience:
@@ -237,7 +237,7 @@ def main():
 
     # Save final model
     if mode == 'training' and step != step_resume or epoch != epoch_resume:
-        save_model(model, optimizer, epoch, step, best_val_loss, results_path)
+        save_model(model, optimizer, training_mode, epoch, step, best_val_loss, results_path)
     
     print('Done!')
     
