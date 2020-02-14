@@ -28,7 +28,7 @@ default_acc_bin_idx = 8
 fast_forward_step = True
 accuracy_bins = 10
 grad_accum_steps = 4
-learning_rate = 1e-4
+learning_rate = 1e-3
 early_stoppping_patience = 5 # Number of epochs that validation accuracy doesn't improve before stopping
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
