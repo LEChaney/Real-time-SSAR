@@ -129,7 +129,7 @@ def main():
     if not load_training_variables:
         epoch_resume = 0
         step_resume = 0
-        best_val_loss = 0
+        best_val_loss = np.inf
 
     # Train / test / val setup
     if mode != 'training':
@@ -236,7 +236,7 @@ def main():
                 break
 
     # Save final model
-    if mode == 'training' and train_step != step_resume or epoch != epoch_resume:
+    if mode == 'training' and (train_step != step_resume or epoch != epoch_resume):
         save_model(model, optimizer, training_mode, epoch, train_step, best_val_loss, results_path)
     
     print('Done!')
