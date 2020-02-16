@@ -78,7 +78,7 @@ def load_latest(model, checkpoint_path, training_mode, optimizer=None):
             else:
                 best_val_loss = np.inf
 
-            return checkpoint['epoch'], checkpoint['step'], best_val_loss, None
+            return checkpoint['epoch'], checkpoint['step'], best_val_loss
     
     print("INFO: No existing checkpoint file to load")
     return 0, 0, np.inf

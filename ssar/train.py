@@ -27,7 +27,7 @@ use_mask_loss = False # Should be True for end-to-end or embedding training
 batch_size = 25
 epochs = 1000
 default_acc_bin_idx = 8
-fast_forward_step = True
+fast_forward_step = False
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
@@ -124,7 +124,7 @@ def main():
         optimizer = None
 
     # Continue from previous training checkpoint
-    epoch_resume, step_resume, best_val_loss = load_latest(model, results_path, optimizer)
+    epoch_resume, step_resume, best_val_loss = load_latest(model, results_path, training_mode, optimizer)
     if not fast_forward_step:
         step_resume = 0
 
