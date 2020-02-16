@@ -71,7 +71,7 @@
                 "--video_path=EgoGesture/",
                 "--annotation_path=Real-time-SSAR/annotation_EgoGesture/egogestureall.json",
                 "--resume_path_det=Real-time-SSAR/results/model_best.pth",
-                "--resume_path_clf=Real-time-SSAR/ssar/results/ssar_save_67_0.pth",
+                "--resume_path_clf=Real-time-SSAR/ssar/results/model_best.pth",
                 "--result_path=Real-time-SSAR/results/online",
                 "--dataset=egogesture",
                 "--sample_duration_det=8",

@@ -85,10 +85,15 @@ class SSARLSTM(nn.Module):
         self.hidden_size = int(input_size)
         self.number_of_classes = number_of_classes
         self.batch_size = batch_size
-        self.lstm1 = nn.LSTM(input_size, self.hidden_size, batch_first=True, dropout=dropout)
-        self.lstm2 = nn.LSTM(self.hidden_size, self.hidden_size, batch_first=True, dropout=dropout)
-        self.lstm3 = nn.LSTM(self.hidden_size, self.hidden_size, batch_first=True, dropout=dropout)
-        self.lstm4 = nn.LSTM(self.hidden_size, self.hidden_size, batch_first=True, dropout=dropout)
+        self.dropout1 = nn.Dropout(dropout)
+        self.lstm1 = nn.LSTM(input_size, self.hidden_size, batch_first=True)
+        self.dropout2 = nn.Dropout(dropout)
+        self.lstm2 = nn.LSTM(self.hidden_size, self.hidden_size, batch_first=True)
+        self.dropout3 = nn.Dropout(dropout)
+        self.lstm3 = nn.LSTM(self.hidden_size, self.hidden_size, batch_first=True)
+        self.dropout4 = nn.Dropout(dropout)
+        self.lstm4 = nn.LSTM(self.hidden_size, self.hidden_size, batch_first=True)
+        self.dropout5 = nn.Dropout(dropout)
         self.fc = nn.Linear(self.hidden_size, self.number_of_classes)
         self.init_lstm_weights()
 
@@ -117,10 +122,20 @@ class SSARLSTM(nn.Module):
         if hidden is None:
             hidden = [None, None, None, None]
 
+        x_data = self.dropout1(x.data)
+        x = PackedSequence(x_data, x.batch_sizes, x.sorted_indices, x.unsorted_indices)
         sequence_labels, hidden[0] = self.lstm1(x, hidden[0])
+        sequence_labels_data = self.dropout2(sequence_labels.data)
+        sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
         sequence_labels, hidden[1] = self.lstm2(sequence_labels, hidden[1])
+        sequence_labels_data = self.dropout3(sequence_labels.data)
+        sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
         sequence_labels, hidden[2] = self.lstm3(sequence_labels, hidden[2])
+        sequence_labels_data = self.dropout4(sequence_labels.data)
+        sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
         sequence_labels, hidden[3] = self.lstm4(sequence_labels, hidden[3])
+        sequence_labels_data = self.dropout5(sequence_labels.data)
+        sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
         if type(sequence_labels) is nn.utils.rnn.PackedSequence:
             label_data = self.fc(sequence_labels.data)
             label = PackedSequence(label_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)

@@ -27,10 +27,11 @@ use_mask_loss = False # Should be True for end-to-end or embedding training
 batch_size = 25
 epochs = 1000
 default_acc_bin_idx = 8
-fast_forward_step = False
+load_training_variables = False # Whether to load that last epoch, training step and best validation score to resume training from
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
+dropout = 0.2
 early_stoppping_patience = 5 # Number of epochs that validation accuracy doesn't improve before stopping
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
@@ -92,7 +93,7 @@ def main():
 
     # Init model and load pre-trained weights
     rnet = resnet.resnet18(False)
-    model = SSAR(ResNet=rnet, input_size=83, number_of_classes=83, batch_size=batch_size, dropout=0).cuda()
+    model = SSAR(ResNet=rnet, input_size=83, number_of_classes=83, batch_size=batch_size, dropout=dropout).cuda()
     model_weights = './weights/final_weights.pth'
     state = model.state_dict()
     loaded_weights = torch.load(model_weights)
@@ -125,8 +126,10 @@ def main():
 
     # Continue from previous training checkpoint
     epoch_resume, step_resume, best_val_loss = load_latest(model, results_path, training_mode, optimizer)
-    if not fast_forward_step:
+    if not load_training_variables:
+        epoch_resume = 0
         step_resume = 0
+        best_val_loss = 0
 
     # Train / test / val setup
     if mode != 'training':
@@ -162,6 +165,7 @@ def main():
         optimizer.zero_grad()
     train_history = {}
     val_history = {}
+    patience_counter = 0
     for epoch in range(epoch_resume, epochs):
         # Display info
         print(f"Epoch: {epoch}")
@@ -175,47 +179,45 @@ def main():
         # Train
         if mode == 'training':
             print('Training:')
-        for step, batch in enumerate(train_loader):
+        for train_step, batch in enumerate(train_loader):
             # Advance train_loader to resume training from last checkpointed position (Note: Assumes same batch size)
-            if epoch == epoch_resume and step < step_resume:
+            if epoch == epoch_resume and train_step < step_resume:
                 del batch
                 continue
 
             # Save model
-            if mode == 'training' and step % 100 == 0 and (step != step_resume or epoch != epoch_resume):
-                save_model(model, optimizer, training_mode, epoch, step, best_val_loss, results_path)
+            if mode == 'training' and train_step % 100 == 0 and (train_step != step_resume or epoch != epoch_resume):
+                save_model(model, optimizer, training_mode, epoch, train_step, best_val_loss, results_path)
 
-            # Do one training step (may not actually step optimizer if doing gradiant accumulation)
-            loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer, mode=mode)
+            # Do one training train_step (may not actually train_step optimizer if doing gradiant accumulation)
+            loss, batch_correct_count_samples = process_batch(model, train_step, batch, criterion, optimizer, mode=mode)
             del batch
             
             # Update metrics
             update_metrics(train_metrics, epoch, loss, batch_correct_count_samples)
 
-            if (step + 1) % 10 == 0:
+            if (train_step + 1) % 10 == 0:
                 # Display metrics
-                print_metrics(train_metrics, step)
+                print_metrics(train_metrics, train_step)
                 update_accuracy_plot(train_acc_bars, train_acc_texts, train_metrics['accuracy_hist'])
         
         # Update train metric history and plots for this epoch
         update_epoch_history(train_history, train_metrics)
         update_loss_plot(train_loss_line, train_history)
         
-        last_step_train = step
-        
         # Validation
         if mode == 'training':
             print('Validation:')
             val_metrics = {}
-            for step, batch in enumerate(val_loader):
-                loss, batch_correct_count_samples = process_batch(model, step, batch, criterion, optimizer, mode='validation')
+            for val_step, batch in enumerate(val_loader):
+                loss, batch_correct_count_samples = process_batch(model, val_step, batch, criterion, optimizer, mode='validation')
 
                 # Update metrics
                 update_metrics(val_metrics, epoch, loss, batch_correct_count_samples)
 
-                if (step + 1) % 10 == 0:
+                if (val_step + 1) % 10 == 0:
                     # Display metrics
-                    print_metrics(val_metrics, step)
+                    print_metrics(val_metrics, val_step)
                     update_accuracy_plot(val_acc_bars, val_acc_texts, val_metrics['accuracy_hist'])
             
             # Update validation metric history and plots
@@ -226,18 +228,16 @@ def main():
             if val_metrics['loss_epoch'] < best_val_loss:
                 best_val_loss = val_metrics['loss_epoch']
                 patience_counter = 0
-                save_model(model, optimizer, training_mode, epoch, step, best_val_loss, results_path, filename_override='model_best.pth')
+                save_model(model, optimizer, training_mode, epoch, val_step, best_val_loss, results_path, filename_override='model_best.pth')
             else:
                 patience_counter += 1
             if patience_counter >= early_stoppping_patience:
                 print(f'Validation accuracy did not improve for {patience_counter} epochs, stopping')
                 break
 
-        step = last_step_train
-
     # Save final model
-    if mode == 'training' and step != step_resume or epoch != epoch_resume:
-        save_model(model, optimizer, training_mode, epoch, step, best_val_loss, results_path)
+    if mode == 'training' and train_step != step_resume or epoch != epoch_resume:
+        save_model(model, optimizer, training_mode, epoch, train_step, best_val_loss, results_path)
     
     print('Done!')
     
