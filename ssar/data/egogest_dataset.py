@@ -1,5 +1,4 @@
 from PIL import Image
-from socket import gethostname
 from torch.utils.data import Dataset
 from data.data import check_and_split_data
 from torchvision import transforms
@@ -15,9 +14,9 @@ import torch
 
 
 class EgoGestData(Dataset):
-    def __init__(self, directory, hostname, image_transform=None, mask_transform=None):
+    def __init__(self, directory, name, image_transform=None, mask_transform=None):
         self.directory = directory
-        self.hostname = hostname
+        self.name = name
         self.filelist = []
         self.labels = np.array(0)
         self.initialise_filelist()
@@ -28,7 +27,7 @@ class EgoGestData(Dataset):
     def initialise_filelist(self):
         path = self.directory + 'labels-final-revised1'
         meta_data_folder = self.directory + '/.meta_data/'
-        meta_data_file = meta_data_folder + "/{}_{}_meta_data.pkl".format("EgoGestData", self.hostname)
+        meta_data_file = meta_data_folder + "/{}_{}_meta_data.pkl".format("EgoGestData", self.name)
         print(meta_data_file)
         if os.path.exists(meta_data_folder):
             if os.path.exists(meta_data_file):
@@ -119,19 +118,21 @@ class EgoGestData(Dataset):
 
 
 class EgoGestDataSequence(Dataset):
-    def __init__(self, directory, hostname, image_transform=None, mask_transform=None, get_mask=True):
+    def __init__(self, directory, name, image_transform=None, mask_transform=None, get_mask=True, subject_ids=None):
         self.directory = directory
-        self.hostname = hostname
+        self.name = name
         self.gesture_list = []
-        self.initialise_gesture_list()
         self.image_transform = image_transform
         self.mask_transform = mask_transform
         self.get_mask = get_mask
+        self.subject_ids = subject_ids
+
+        self.initialise_gesture_list()
 
     def initialise_gesture_list(self):
         path = self.directory + 'labels-final-revised1'
         meta_data_folder = self.directory + '/.meta_data/'
-        meta_data_file = meta_data_folder + "/{}_{}_sequence_meta_data.pkl".format("EgoGestData", self.hostname)
+        meta_data_file = meta_data_folder + "/{}_{}_sequence_meta_data.pkl".format("EgoGestData", self.name)
         print(meta_data_file)
         if os.path.exists(meta_data_folder):
             if os.path.exists(meta_data_file):
@@ -143,9 +144,15 @@ class EgoGestDataSequence(Dataset):
                     return
         else:
             os.mkdir(meta_data_folder)
+        
+        if self.subject_ids:
+            self.subject_ids = [f'subject{sbj_id:02}' for sbj_id in self.subject_ids]
+
         subjects = sorted(os.listdir(path))
         for subject in subjects:
             if subject == '.DS_Store':
+                continue
+            if self.subject_ids and subject.lower() not in self.subject_ids:
                 continue
             subject_path = path + '/' + subject
             scenes = sorted(os.listdir(subject_path))
