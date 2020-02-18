@@ -21,18 +21,18 @@ import os
 # import gc
 
 results_path = 'results'
-mode = 'training'
+mode = 'training' # Should be one of ['training', 'validation', 'testing']
 training_mode = 'lstm-only' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
 use_mask_loss = False # Should be True for end-to-end or embedding training
 batch_size = 25
 epochs = 1000
 default_acc_bin_idx = 8
-load_training_variables = False # Whether to load that last epoch, training step and best validation score to resume training from
+load_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
-dropout = 0.2
-early_stoppping_patience = 5 # Number of epochs that validation accuracy doesn't improve before stopping
+dropout = 0.5
+early_stoppping_patience = 20 # Number of epochs that validation accuracy doesn't improve before stopping
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
 # Enable to update batch norm running means and variances (only set this if the batch size is large enough for accurate mean / var estimation)
