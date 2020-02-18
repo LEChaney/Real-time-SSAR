@@ -75,7 +75,7 @@ def main():
     # If we're not in training mode then switch the training dataset out with test or validation
     if mode == 'validation':
         train_dataset = val_dataset
-    else:
+    elif mode == 'testing':
         train_dataset = test_dataset
 
     torch.manual_seed(42)
