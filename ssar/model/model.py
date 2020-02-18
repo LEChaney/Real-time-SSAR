@@ -122,25 +122,35 @@ class SSARLSTM(nn.Module):
         if hidden is None:
             hidden = [None, None, None, None]
 
-        x_data = self.dropout1(x.data)
-        x = PackedSequence(x_data, x.batch_sizes, x.sorted_indices, x.unsorted_indices)
-        sequence_labels, hidden[0] = self.lstm1(x, hidden[0])
-        sequence_labels_data = self.dropout2(sequence_labels.data)
-        sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
-        sequence_labels, hidden[1] = self.lstm2(sequence_labels, hidden[1])
-        sequence_labels_data = self.dropout3(sequence_labels.data)
-        sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
-        sequence_labels, hidden[2] = self.lstm3(sequence_labels, hidden[2])
-        sequence_labels_data = self.dropout4(sequence_labels.data)
-        sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
-        sequence_labels, hidden[3] = self.lstm4(sequence_labels, hidden[3])
-        sequence_labels_data = self.dropout5(sequence_labels.data)
-        sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
-        if type(sequence_labels) is nn.utils.rnn.PackedSequence:
+        if type(x) is PackedSequence:
+            x_data = self.dropout1(x.data)
+            x = PackedSequence(x_data, x.batch_sizes, x.sorted_indices, x.unsorted_indices)
+            sequence_labels, hidden[0] = self.lstm1(x, hidden[0])
+            sequence_labels_data = self.dropout2(sequence_labels.data)
+            sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
+            sequence_labels, hidden[1] = self.lstm2(sequence_labels, hidden[1])
+            sequence_labels_data = self.dropout3(sequence_labels.data)
+            sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
+            sequence_labels, hidden[2] = self.lstm3(sequence_labels, hidden[2])
+            sequence_labels_data = self.dropout4(sequence_labels.data)
+            sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
+            sequence_labels, hidden[3] = self.lstm4(sequence_labels, hidden[3])
+            sequence_labels_data = self.dropout5(sequence_labels.data)
+            sequence_labels = PackedSequence(sequence_labels_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
+        
             label_data = self.fc(sequence_labels.data)
             label = PackedSequence(label_data, sequence_labels.batch_sizes, sequence_labels.sorted_indices, sequence_labels.unsorted_indices)
             label, seq_lengths = pad_packed_sequence(sequence=label, batch_first=True)
         else:
+            x = self.dropout1(x)
+            sequence_labels, hidden[0] = self.lstm1(x, hidden[0])
+            sequence_labels = self.dropout2(sequence_labels)
+            sequence_labels, hidden[1] = self.lstm2(sequence_labels, hidden[1])
+            sequence_labels = self.dropout3(sequence_labels)
+            sequence_labels, hidden[2] = self.lstm3(sequence_labels, hidden[2])
+            sequence_labels = self.dropout4(sequence_labels)
+            sequence_labels, hidden[3] = self.lstm4(sequence_labels, hidden[3])
+            sequence_labels = self.dropout5(sequence_labels)
             label = self.fc(sequence_labels)
         label = label.permute([0, 2, 1]) # [N, D, C] -> [N, C, D] format for nn.CrossEntropyLoss
         
