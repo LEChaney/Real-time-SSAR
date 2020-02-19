@@ -98,21 +98,21 @@ def main():
 						 45, 46, 48, 49, 50]
     subject_ids_val = [1, 7, 12, 13, 24, 29, 33, 34, 35, 37]
     subject_ids_test = [ 2, 9, 11, 14, 18, 19, 28, 31, 41, 47]
-    train_dataset = EgoGestDataSequence(path, 'train_dataset', image_transform_train, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_train)
-    val_dataset   = EgoGestDataSequence(path, 'val_dataset'  , image_transform_val, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
-    test_dataset  = EgoGestDataSequence(path, 'test_dataset' , image_transform_test, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_test)
+
+    if mode == 'training':
+        train_dataset = EgoGestDataSequence(path, 'train_dataset', image_transform_train, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_train)
+        val_dataset   = EgoGestDataSequence(path, 'val_dataset'  , image_transform_val  , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
+    # If we're not in training mode then switch the training dataset out with test or validation
+    elif mode == 'validation':
+        train_dataset = EgoGestDataSequence(path, 'val_dataset'  , image_transform_val  , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
+    else:
+        train_dataset = EgoGestDataSequence(path, 'val_dataset'  , image_transform_test , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_test)
 
     # train_indices, val_indices, test_indices = check_and_split_data(host_name=hostname,
     #                                                                 data_folder=path,
     #                                                                 dataset_len=len(dataset),
     #                                                                 train_fraction=0.6,
     #                                                                 validation_fraction=0.2)
-
-    # If we're not in training mode then switch the training dataset out with test or validation
-    if mode == 'validation':
-        train_dataset = val_dataset
-    elif mode == 'testing':
-        train_dataset = test_dataset
 
     torch.manual_seed(42)
     torch.backends.cudnn.deterministic = True
@@ -124,20 +124,14 @@ def main():
         pin_memory=True,
         shuffle=True,
         collate_fn=collate_fn_padd)
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        num_workers=8,
-        pin_memory=True,
-        shuffle=True,
-        collate_fn=collate_fn_padd)
-    # test_loader = torch.utils.data.DataLoader(
-    #     dataset,
-    #     batch_size=batch_size,
-    #     num_workers=8,
-    #     pin_memory=True,
-    #     sampler=FixedIndicesSampler(test_indices),
-    #     collate_fn=collate_fn_padd)
+    if mode == 'training':
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            num_workers=8,
+            pin_memory=True,
+            shuffle=True,
+            collate_fn=collate_fn_padd)
 
     # Init model and load pre-trained weights
     rnet = resnet.resnet18(False)
