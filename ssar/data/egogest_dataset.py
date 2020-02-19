@@ -95,7 +95,7 @@ class EgoGestData(Dataset):
         image_name = self.filelist[idx]
         mask_name = image_name.replace('Color/rgb', 'Depth/depth')
         image = Image.open(image_name).convert("RGB")
-        mask = Image.open(mask_name).convert("L").resize((224, 126), Image.BILINEAR)
+        mask = Image.open(mask_name).convert("L")
         threshold = 10
         mask = mask.point(lambda p: p > threshold and 255)
 
@@ -202,17 +202,20 @@ class EgoGestDataSequence(Dataset):
         if self.get_mask:
             masks = torch.ones(num_images, 126, 224).long()
         for i, image_name in enumerate(image_names):
-            image = Image.open(image_name).convert("RGB").resize((224, 126), Image.BILINEAR)
+            image = Image.open(image_name).convert("RGB")
             if self.image_transform:
+                self.image_transform.randomize_parameters()
                 image = self.image_transform(image)
             images[i, :, :, :] = image
 
             if self.get_mask:
                 mask_name = mask_names[i]
-                mask = Image.open(mask_name).convert("L").resize((224, 126), Image.BILINEAR)
+                mask = Image.open(mask_name).convert("L")
                 threshold = 10
                 mask = mask.point(lambda p: p > threshold and 255)
                 if self.mask_transform:
+                    # TODO: Replace with copy of parameters from image transform to ensure that input image and target mask match
+                    self.mask_transform.randomize_parameters() 
                     mask = self.mask_transform(mask)
                     mask = torch.squeeze(mask)
                 mask = mask.long()

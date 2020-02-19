@@ -9,6 +9,7 @@ from torch.optim import Adam
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, PackedSequence
 from utils import dfs_freeze, save_model, load_latest, set_bn_train_mode
 from matplotlib.animation import FFMpegWriter
+from spatial_transforms import MultiScaleRandomCrop, Compose, SpatialElasticDisplacement
 
 import matplotlib.pyplot as plt
 import argparse
@@ -31,14 +32,37 @@ load_training_variables = True # Whether to load that last epoch, training step 
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
-dropout = 0.5
+dropout = 0.2
 early_stoppping_patience = 20 # Number of epochs that validation accuracy doesn't improve before stopping
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
 # Enable to update batch norm running means and variances (only set this if the batch size is large enough for accurate mean / var estimation)
 # Only applies in 'end-to-end' training mode
 enable_bn_mean_var_update = False
+# Control variables for multiscale random crop transform used during training
+initial_scale = 1
+n_scales = 5
+scale_step = 0.84089641525
 
+# Used to quickly switch model between modes for training and validation
+def set_train_mode(model, train=True):
+    if train:
+        # Switch to train mode while freezing parts of the model we don't want to train
+        if mode != 'training':
+            model.eval()
+        elif training_mode == 'lstm-only':
+            model.eval()
+            dfs_freeze(model)
+            if mode == 'training':
+                model.lstms.train()
+                dfs_freeze(model.lstms, unfreeze=True)
+        elif training_mode == 'end-to-end':
+            model.train()
+            dfs_freeze(model, unfreeze=True)
+            # Enable / Disable running mean variance update on batchnorm layers
+            set_bn_train_mode(model, train=enable_bn_mean_var_update)
+    else:
+        model.eval()
 
 def main():
     global epochs
@@ -49,11 +73,23 @@ def main():
     args = parser.parse_args()
     path = args.path
 
+    # Setup multiscale random crop
+    scales = [initial_scale]
+    for _ in range(1, n_scales):
+        scales.append(scales[-1] * scale_step)
+
     # Setup datasets / dataloaders
-    image_transform = transforms.Compose([transforms.Resize((126, 224)),
-                                          transforms.ToTensor(),
-                                          transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                                          ])
+    image_transform_train = Compose([
+                                     MultiScaleRandomCrop(scales, (126, 224)),
+                                     SpatialElasticDisplacement(),
+                                     transforms.ToTensor(),
+                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                                     ])
+    image_transform_val = image_transform_test = Compose([
+                                     transforms.Resize((126, 224)),
+                                     transforms.ToTensor(),
+                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                                     ])
     mask_transform = transforms.Compose([transforms.ToTensor()])
 
 
@@ -62,9 +98,9 @@ def main():
 						 45, 46, 48, 49, 50]
     subject_ids_val = [1, 7, 12, 13, 24, 29, 33, 34, 35, 37]
     subject_ids_test = [ 2, 9, 11, 14, 18, 19, 28, 31, 41, 47]
-    train_dataset = EgoGestDataSequence(path, 'train_dataset', image_transform, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_train)
-    val_dataset   = EgoGestDataSequence(path, 'val_dataset'  , image_transform, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
-    test_dataset  = EgoGestDataSequence(path, 'test_dataset' , image_transform, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_test)
+    train_dataset = EgoGestDataSequence(path, 'train_dataset', image_transform_train, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_train)
+    val_dataset   = EgoGestDataSequence(path, 'val_dataset'  , image_transform_val, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
+    test_dataset  = EgoGestDataSequence(path, 'test_dataset' , image_transform_test, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_test)
 
     # train_indices, val_indices, test_indices = check_and_split_data(host_name=hostname,
     #                                                                 data_folder=path,
@@ -112,26 +148,12 @@ def main():
     state.update(loaded_weights)
     model.load_state_dict(state)
 
-    # Freeze parts of model we don't want to train
-    if mode != 'training':
-        model.eval()
-    elif training_mode == 'lstm-only':
-        model.eval()
-        dfs_freeze(model)
-        if mode == 'training':
-            model.lstms.train()
-            dfs_freeze(model.lstms, unfreeze=True)
-    elif training_mode == 'end-to-end':
-        model.train()
-        dfs_freeze(model, unfreeze=True)
-
-        # Enable / Disable running mean variance update on batchnorm layers
-        set_bn_train_mode(model, train=enable_bn_mean_var_update)
 
     # Setup optimizer and loss
     criterion = torch.nn.CrossEntropyLoss()
     criterion = criterion.cuda()
     if mode == 'training':
+        set_train_mode(model, train=True) # Need this here so the optimizer has the correct parameters to be trained
         optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate)
     else:
         optimizer = None
@@ -188,6 +210,9 @@ def main():
         # Reset epoch stats
         train_metrics = {}
 
+        # Switch to train mode while freezing parts of the model we don't want to train
+        set_train_mode(model, train=True)
+
         # Train
         if mode == 'training':
             print('Training:')
@@ -221,6 +246,10 @@ def main():
         if mode == 'training':
             print('Validation:')
             val_metrics = {}
+
+            # Switch to evaluation mode for validation
+            set_train_mode(model, train=False)
+
             for val_step, batch in enumerate(val_loader):
                 loss, batch_correct_count_samples = process_batch(model, val_step, batch, criterion, optimizer, mode='validation')
 
@@ -364,12 +393,14 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
         labels = labels.gather(1, indices)
         correct_count_hist = torch.sum(labels == generated_labels, axis=0).cpu().numpy()
 
-        # if count == 0:
-        #     im_plt = plt.imshow(masks[0, lengths[0] // 2, 1].cpu())
-        # else:
-        #     im_plt.set_data(masks[0, lengths[0] // 2, 1].cpu())
+        # images, _ = pad_packed_sequence(images, batch_first=True)
+        # try:
+        #     im_plt.set_data(images[0, lengths[0] // 2].permute(1, 2, 0).cpu())
+        # except:
+        #     im_plt = plt.imshow(images[0, lengths[0] // 2].permute(1, 2, 0).cpu())
         # plt.draw()
         # plt.pause(0.0001)
+
         return loss.item() * grad_accum_steps, correct_count_hist # Return undivided loss
 
     # cur_tensor_set = set()
