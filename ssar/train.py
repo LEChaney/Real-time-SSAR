@@ -50,12 +50,12 @@ def set_train_mode(model, train=True):
         # Switch to train mode while freezing parts of the model we don't want to train
         if mode != 'training':
             model.eval()
+            dfs_freeze(model)
         elif training_mode == 'lstm-only':
             model.eval()
+            model.lstms.train()
             dfs_freeze(model)
-            if mode == 'training':
-                model.lstms.train()
-                dfs_freeze(model.lstms, unfreeze=True)
+            dfs_freeze(model.lstms, unfreeze=True)
         elif training_mode == 'end-to-end':
             model.train()
             dfs_freeze(model, unfreeze=True)
@@ -63,6 +63,7 @@ def set_train_mode(model, train=True):
             set_bn_train_mode(model, train=enable_bn_mean_var_update)
     else:
         model.eval()
+        dfs_freeze(model)
 
 def main():
     global epochs
