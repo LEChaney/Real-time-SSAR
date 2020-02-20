@@ -24,7 +24,7 @@ import os
 results_path = 'results'
 mode = 'training' # Should be one of ['training', 'validation', 'testing']
 training_mode = 'lstm-only' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
-use_mask_loss = False # Should be True for end-to-end or embedding training
+use_mask_loss = (training_mode == 'end-to-end') # Should be True for end-to-end or embedding training
 batch_size = 25
 epochs = 1000
 default_acc_bin_idx = 8
@@ -32,11 +32,8 @@ load_training_variables = True # Whether to load that last epoch, training step 
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
-dropout = 0.2
+dropout = 0.0
 early_stoppping_patience = 20 # Number of epochs that validation accuracy doesn't improve before stopping
-# Enable to update batch norm running means and variances (only set this if the batch size is large enough for accurate mean / var estimation)
-# Only applies in 'end-to-end' training mode
-enable_bn_mean_var_update = False
 # Control variables for multiscale random crop transform used during training
 do_data_augmentation = True
 initial_scale = 1
@@ -61,8 +58,8 @@ def set_train_mode(model, train=True):
         elif training_mode == 'end-to-end':
             model.train()
             dfs_freeze(model, unfreeze=True)
-            # Enable / Disable running mean variance update on batchnorm layers
-            set_bn_train_mode(model, train=enable_bn_mean_var_update)
+            # Disable running mean variance update during end-to-end training (batch size too small)
+            set_bn_train_mode(model, train=False)
     else:
         model.eval()
         dfs_freeze(model)
