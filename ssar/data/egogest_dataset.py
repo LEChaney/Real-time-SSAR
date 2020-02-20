@@ -198,17 +198,19 @@ class EgoGestDataSequence(Dataset):
             for image_name in image_names:
                 mask_names.append(image_name.replace('Color/rgb', 'Depth/depth'))
 
+        # Randomize the transform parameters here so they are the same for all images in the sequence
+        # BUG: Stateful transform objects seems very un-threadsafe, it seems likely this will cause problems with multiple dataloader worker threads
+        if self.image_transform:
+            self.image_transform.randomize_parameters()
+        if self.get_mask and self.mask_transform:
+            self.mask_transform.randomize_parameters()
+
         images = torch.ones((num_images, 3, 126, 224))
         if self.get_mask:
             masks = torch.ones(num_images, 126, 224).long()
         for i, image_name in enumerate(image_names):
             image = Image.open(image_name).convert("RGB")
-            if self.get_mask and self.mask_transform:
-                # Do this here in case image transform and mask transform are sharing some transforms (they generally will)
-                # This prevents the parameters changing in between transforming the image and transforming the mask
-                self.mask_transform.randomize_parameters()
             if self.image_transform:
-                self.image_transform.randomize_parameters()
                 image = self.image_transform(image)
             images[i, :, :, :] = image
 

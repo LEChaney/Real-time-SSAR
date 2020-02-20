@@ -32,10 +32,10 @@ load_training_variables = True # Whether to load that last epoch, training step 
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
-dropout = 0.0
-early_stoppping_patience = 20 # Number of epochs that validation accuracy doesn't improve before stopping
+dropout = 0.2
+early_stoppping_patience = 50 # Number of epochs that validation accuracy doesn't improve before stopping
 # Control variables for multiscale random crop transform used during training
-do_data_augmentation = True
+do_data_augmentation = False
 initial_scale = 1
 n_scales = 5
 scale_step = 0.84089641525
