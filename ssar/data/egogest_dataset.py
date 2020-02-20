@@ -203,6 +203,10 @@ class EgoGestDataSequence(Dataset):
             masks = torch.ones(num_images, 126, 224).long()
         for i, image_name in enumerate(image_names):
             image = Image.open(image_name).convert("RGB")
+            if self.get_mask and self.mask_transform:
+                # Do this here in case image transform and mask transform are sharing some transforms (they generally will)
+                # This prevents the parameters changing in between transforming the image and transforming the mask
+                self.mask_transform.randomize_parameters()
             if self.image_transform:
                 self.image_transform.randomize_parameters()
                 image = self.image_transform(image)
@@ -214,8 +218,6 @@ class EgoGestDataSequence(Dataset):
                 threshold = 10
                 mask = mask.point(lambda p: p > threshold and 255)
                 if self.mask_transform:
-                    # TODO: Replace with copy of parameters from image transform to ensure that input image and target mask match
-                    self.mask_transform.randomize_parameters() 
                     mask = self.mask_transform(mask)
                     mask = torch.squeeze(mask)
                 mask = mask.long()

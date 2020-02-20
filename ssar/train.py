@@ -34,15 +34,17 @@ grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_
 learning_rate = 1e-3
 dropout = 0.2
 early_stoppping_patience = 20 # Number of epochs that validation accuracy doesn't improve before stopping
-rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
-rel_poses_gpu = rel_poses.cuda()
 # Enable to update batch norm running means and variances (only set this if the batch size is large enough for accurate mean / var estimation)
 # Only applies in 'end-to-end' training mode
 enable_bn_mean_var_update = False
 # Control variables for multiscale random crop transform used during training
+do_data_augmentation = True
 initial_scale = 1
 n_scales = 5
 scale_step = 0.84089641525
+# Positions at which to measure / display accuracy
+rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
+rel_poses_gpu = rel_poses.cuda()
 
 # Used to quickly switch model between modes for training and validation
 def set_train_mode(model, train=True):
@@ -80,18 +82,23 @@ def main():
         scales.append(scales[-1] * scale_step)
 
     # Setup datasets / dataloaders
-    image_transform_train = Compose([
-                                     MultiScaleRandomCrop(scales, (126, 224)),
-                                     SpatialElasticDisplacement(),
+    if do_data_augmentation:
+        train_spatial_transforms = Compose([MultiScaleRandomCrop(scales, (126, 224)),
+                                            SpatialElasticDisplacement()])
+    else:
+        train_spatial_transforms = transforms.Resize((126, 224))
+    image_transform_train = Compose([train_spatial_transforms,
                                      transforms.ToTensor(),
-                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                                     ])
-    image_transform_val = image_transform_test = Compose([
-                                     transforms.Resize((126, 224)),
+                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    image_transform_val   = Compose([transforms.Resize((126, 224)),
                                      transforms.ToTensor(),
-                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                                     ])
-    mask_transform = transforms.Compose([transforms.ToTensor()])
+                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    image_transform_test  = Compose([transforms.Resize((126, 224)),
+                                     transforms.ToTensor(),
+                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    mask_transform = transforms.Compose([train_spatial_transforms, transforms.ToTensor()])
+    if not do_data_augmentation:
+        image_transform_train = image_transform_val
 
 
     subject_ids_train = [3,  4,  5,  6,  8,  10, 15, 16, 17, 20, 21, 22, 23,
