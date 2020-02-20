@@ -44,13 +44,14 @@ class SSARDecoder(nn.Module):
         self.deconv2 = nn.ConvTranspose2d(32, 16, 4, 2, 1)
         self.deconv3 = nn.ConvTranspose2d(16, 8, 4, 2, 1)
         self.deconv4 = nn.ConvTranspose2d(8, 2, 4, 2, (2, 1))
+        self.relu = nn.ReLU()
 
     def forward(self, x):
 
-        x = self.deconv0(x)
-        x = self.deconv1(x)
-        x = self.deconv2(x)
-        x = self.deconv3(x)
+        x = self.relu(self.deconv0(x))
+        x = self.relu(self.deconv1(x))
+        x = self.relu(self.deconv2(x))
+        x = self.relu(self.deconv3(x))
         mask = self.deconv4(x)
 
         return mask
@@ -159,13 +160,14 @@ class SSARLSTM(nn.Module):
 
 class SSAR(nn.Module):
 
-    def __init__(self, ResNet, input_size, number_of_classes, batch_size, dropout):
+    def __init__(self, ResNet, input_size, number_of_classes, batch_size, dropout, use_lstm=True):
         super(SSAR, self).__init__()
         self.encoder = SSAREncoder(ResNet)
         self.decoder = SSARDecoder()
         self.embedding_generator = SSAREmbeddingGenerator()
         self.lstms = SSARLSTM(input_size, number_of_classes, batch_size, dropout)
         self.batch_size = batch_size
+        self.use_lstm = use_lstm
 
     def forward(self, x, lstm_hidden=None, lengths=None, get_mask=False, get_lstm_state=False):
         packed_seq = None
@@ -183,7 +185,10 @@ class SSAR(nn.Module):
         if packed_seq is not None:
             embeddings = PackedSequence(embeddings, packed_seq.batch_sizes, packed_seq.sorted_indices, packed_seq.unsorted_indices)
 
-        label, lstm_hidden = self.lstms(embeddings, lengths, lstm_hidden)
+        if self.use_lstm:
+            label, lstm_hidden = self.lstms(embeddings, lengths, lstm_hidden)
+        else:
+            label = embeddings
 
         outputs = []
         if get_mask:

@@ -14,15 +14,16 @@ import torch
 
 
 class EgoGestData(Dataset):
-    def __init__(self, directory, name, image_transform=None, mask_transform=None):
+    def __init__(self, directory, name, image_transform=None, mask_transform=None, subject_ids=None):
         self.directory = directory
         self.name = name
         self.filelist = []
         self.labels = np.array(0)
-        self.initialise_filelist()
-        self.remove_zero_labels()
         self.image_transform = image_transform
         self.mask_transform = mask_transform
+        self.subject_ids = subject_ids
+        self.initialise_filelist()
+        self.remove_zero_labels()
 
     def initialise_filelist(self):
         path = self.directory + 'labels-final-revised1'
@@ -40,10 +41,16 @@ class EgoGestData(Dataset):
                     return
         else:
             os.mkdir(meta_data_folder)
+
+        if self.subject_ids:
+            self.subject_ids = [f'subject{sbj_id:02}' for sbj_id in self.subject_ids]
+
         print('{}: Creating file list '.format(datetime.datetime.now().time()))
         subjects = sorted(os.listdir(path))
         for subject in subjects:
             if subject == '.DS_Store':
+                continue
+            if self.subject_ids and subject.lower() not in self.subject_ids:
                 continue
             subject_path = path + '/' + subject
             scenes = sorted(os.listdir(subject_path))
@@ -106,11 +113,17 @@ class EgoGestData(Dataset):
             im_as_array = ski_util.random_noise(np.asarray(image), mode, seed=None, clip=True)
             image = Image.fromarray(np.uint8(im_as_array * 255))
 
+        if self.mask_transform:
+            # Do this here in case image transform and mask transform are sharing some transforms (they generally will)
+            # This prevents the parameters changing in between transforming the image and transforming the mask
+            self.mask_transform.randomize_parameters()
         if self.image_transform:
+            self.image_transform.randomize_parameters()
             image = self.image_transform(image)
         if self.mask_transform:
             mask = self.mask_transform(mask)
             mask = torch.squeeze(mask)
+        mask = mask.long()
 
         sample = {'image': image, 'mask': mask, 'label': self.labels[idx], 'name': image_name}
 
@@ -225,10 +238,10 @@ class EgoGestDataSequence(Dataset):
                 
         label = torch.tensor([gesture[0]]).repeat([num_images])
 
-        sample = {'images': images, 'label': label,
+        sample = {'image': images, 'label': label,
                   'img_name': image_names, 'length': num_images}
         if self.get_mask:
-            sample['masks'] = masks
+            sample['mask'] = masks
             sample['msk_name'] = mask_names
 
         return sample

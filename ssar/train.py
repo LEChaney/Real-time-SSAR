@@ -1,4 +1,4 @@
-from data.egogest_dataset import EgoGestDataSequence
+from data.egogest_dataset import EgoGestDataSequence, EgoGestData
 from data.data import check_and_split_data, FixedIndicesSampler, collate_fn_padd
 from model.model import SSAR
 from socket import gethostname
@@ -23,28 +23,27 @@ import os
 
 results_path = 'results'
 mode = 'training' # Should be one of ['training', 'validation', 'testing']
-training_mode = 'lstm-only' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
-use_mask_loss = False # Should be True for end-to-end or embedding training
+training_mode = 'embedding-and-mask' # Should be one of ['end-to-end', 'lstm-only', 'embedding-and-mask'], only applies in 'training' mode
+use_mask_loss = True # Should be True for end-to-end or embedding training
 batch_size = 25
 epochs = 1000
 default_acc_bin_idx = 8
-load_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
+restore_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
-learning_rate = 1e-3
-dropout = 0.2
+learning_rate = 1e-2
+dropout = 0.0
 early_stoppping_patience = 20 # Number of epochs that validation accuracy doesn't improve before stopping
-# Enable to update batch norm running means and variances (only set this if the batch size is large enough for accurate mean / var estimation)
-# Only applies in 'end-to-end' training mode
-enable_bn_mean_var_update = False
 # Control variables for multiscale random crop transform used during training
-do_data_augmentation = True
+do_data_augmentation = False
 initial_scale = 1
 n_scales = 5
 scale_step = 0.84089641525
 # Positions at which to measure / display accuracy
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
+
+use_lstm = False if training_mode == 'embedding-and-mask' else True
 
 # Used to quickly switch model between modes for training and validation
 def set_train_mode(model, train=True):
@@ -61,8 +60,12 @@ def set_train_mode(model, train=True):
         elif training_mode == 'end-to-end':
             model.train()
             dfs_freeze(model, unfreeze=True)
-            # Enable / Disable running mean variance update on batchnorm layers
-            set_bn_train_mode(model, train=enable_bn_mean_var_update)
+            # Disable running mean variance update on batchnorm layers for end-to-end finetuning (batch size too small)
+            set_bn_train_mode(model, train=False)
+        elif training_mode == 'embedding-and-mask':
+            model.train()
+            dfs_freeze(model, unfreeze=True)
+            dfs_freeze(model.lstms)
     else:
         model.eval()
         dfs_freeze(model)
@@ -96,7 +99,7 @@ def main():
     image_transform_test  = Compose([transforms.Resize((126, 224)),
                                      transforms.ToTensor(),
                                      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    mask_transform = transforms.Compose([train_spatial_transforms, transforms.ToTensor()])
+    mask_transform        = Compose([train_spatial_transforms, transforms.ToTensor()])
     if not do_data_augmentation:
         image_transform_train = image_transform_val
 
@@ -107,14 +110,24 @@ def main():
     subject_ids_val = [1, 7, 12, 13, 24, 29, 33, 34, 35, 37]
     subject_ids_test = [ 2, 9, 11, 14, 18, 19, 28, 31, 41, 47]
 
-    if mode == 'training':
-        train_dataset = EgoGestDataSequence(path, 'train_dataset', image_transform_train, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_train)
-        val_dataset   = EgoGestDataSequence(path, 'val_dataset'  , image_transform_val  , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
-    # If we're not in training mode then switch the training dataset out with test or validation
-    elif mode == 'validation':
-        train_dataset = EgoGestDataSequence(path, 'val_dataset'  , image_transform_val  , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
+    if training_mode == 'embedding-and-mask':
+        if mode == 'training':
+            train_dataset = EgoGestData(path, 'train_dataset', image_transform_train, mask_transform, subject_ids=subject_ids_train)
+            val_dataset   = EgoGestData(path, 'val_dataset'  , image_transform_val  , mask_transform, subject_ids=subject_ids_val)
+        # If we're not in training mode then switch the training dataset out with test or validation
+        elif mode == 'validation':
+            train_dataset = EgoGestData(path, 'val_dataset'  , image_transform_val  , mask_transform, subject_ids=subject_ids_val)
+        else:
+            train_dataset = EgoGestData(path, 'val_dataset'  , image_transform_test , mask_transform, subject_ids=subject_ids_test)
     else:
-        train_dataset = EgoGestDataSequence(path, 'val_dataset'  , image_transform_test , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_test)
+        if mode == 'training':
+            train_dataset = EgoGestDataSequence(path, 'train_dataset', image_transform_train, mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_train)
+            val_dataset   = EgoGestDataSequence(path, 'val_dataset'  , image_transform_val  , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
+        # If we're not in training mode then switch the training dataset out with test or validation
+        elif mode == 'validation':
+            train_dataset = EgoGestDataSequence(path, 'val_dataset'  , image_transform_val  , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_val)
+        else:
+            train_dataset = EgoGestDataSequence(path, 'val_dataset'  , image_transform_test , mask_transform, get_mask=use_mask_loss, subject_ids=subject_ids_test)
 
     # train_indices, val_indices, test_indices = check_and_split_data(host_name=hostname,
     #                                                                 data_folder=path,
@@ -131,7 +144,7 @@ def main():
         num_workers=8,
         pin_memory=True,
         shuffle=True,
-        collate_fn=collate_fn_padd)
+        collate_fn=collate_fn_padd if use_lstm else None)
     if mode == 'training':
         val_loader = torch.utils.data.DataLoader(
             val_dataset,
@@ -139,11 +152,11 @@ def main():
             num_workers=8,
             pin_memory=True,
             shuffle=True,
-            collate_fn=collate_fn_padd)
+            collate_fn=collate_fn_padd if use_lstm else None)
 
     # Init model and load pre-trained weights
     rnet = resnet.resnet18(False)
-    model = SSAR(ResNet=rnet, input_size=83, number_of_classes=83, batch_size=batch_size, dropout=dropout).cuda()
+    model = SSAR(ResNet=rnet, input_size=83, number_of_classes=83, batch_size=batch_size, dropout=dropout, use_lstm=use_lstm).cuda()
     model_weights = './weights/final_weights.pth'
     state = model.state_dict()
     loaded_weights = torch.load(model_weights)
@@ -162,7 +175,7 @@ def main():
 
     # Continue from previous training checkpoint
     epoch_resume, step_resume, best_val_loss = load_latest(model, results_path, training_mode, optimizer)
-    if not load_training_variables:
+    if not restore_training_variables:
         epoch_resume = 0
         step_resume = 0
         best_val_loss = np.inf
@@ -346,13 +359,19 @@ def update_metrics(metrics, epoch, loss, batch_correct_count_samples):
 
 # Perfom one training step on one batch of data (may not actually step optimizer if doing gradiant accumulation)
 def process_batch(model, step, batch, criterion, optimizer, mode='training'):
-    images = batch['images']
+    images = batch['image']
 
     images = images.cuda()
-    labels = pad_packed_sequence(batch['label'], batch_first=True)[0].cuda()
-    lengths = batch['length'].cuda()
+    if use_lstm:
+        labels = pad_packed_sequence(batch['label'], batch_first=True)[0].cuda()
+        lengths = batch['length'].cuda()
+    else:
+        labels = batch['label']
     if use_mask_loss:
-        true_mask = pad_packed_sequence(batch['masks'], batch_first=True)[0].cuda()
+        if use_lstm:
+            true_mask = pad_packed_sequence(batch['mask'], batch_first=True)[0].cuda()
+        else:
+            true_mask = batch['mask']
 
     generated_labels = model(images, lengths=lengths, get_mask=use_mask_loss, get_lstm_state=False)
     if use_mask_loss:
@@ -386,14 +405,18 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
         # label = labels.gather(1, indices).squeeze(1)
         # correct_count = torch.sum(label == generated_label).item()
 
-        end_indices = (lengths - 1)
-        end_indices = (end_indices.view(-1, 1) * rel_poses_gpu.view(1, -1)).long()
-        indices = end_indices.view(-1, 1, accuracy_bins).repeat(1, generated_labels.shape[1], 1)
-        generated_labels = generated_labels.gather(2, indices)
-        generated_labels = torch.argmax(generated_labels, dim=1)
-        indices = end_indices
-        labels = labels.gather(1, indices)
-        correct_count_hist = torch.sum(labels == generated_labels, axis=0).cpu().numpy()
+        if use_lstm:
+            end_indices = (lengths - 1)
+            end_indices = (end_indices.view(-1, 1) * rel_poses_gpu.view(1, -1)).long()
+            indices = end_indices.view(-1, 1, accuracy_bins).repeat(1, generated_labels.shape[1], 1)
+            generated_labels = generated_labels.gather(2, indices)
+            generated_labels = torch.argmax(generated_labels, dim=1)
+            indices = end_indices
+            labels = labels.gather(1, indices)
+            correct_count_hist = torch.sum(labels == generated_labels, axis=0).cpu().numpy()
+        else:
+            generated_labels = torch.argmax(generated_labels, dim=1)
+            correct_count_hist = torch.sum(labels == generated_labels, axis=0).cpu().numpy()
 
         # images, _ = pad_packed_sequence(images, batch_first=True)
         # try:
