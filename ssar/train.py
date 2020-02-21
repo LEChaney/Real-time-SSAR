@@ -349,11 +349,11 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
 
     images = images.cuda()
     labels = pad_packed_sequence(batch['label'], batch_first=True, padding_value=label_mask_value)[0].cuda()
-    start_mask = (torch.ones([labels.shape[0], frame_start_loss_calc]).long() * label_mask_value).cuda()
-    labels = torch.cat([start_mask, labels[:, frame_start_loss_calc:]], dim=1)
+    start_label_mask = (torch.ones([labels.shape[0], frame_start_loss_calc]).long() * label_mask_value).cuda()
+    labels_masked = torch.cat([start_label_mask, labels[:, frame_start_loss_calc:]], dim=1)
     lengths = batch['length'].cuda()
     if use_mask_loss:
-        true_mask = pad_packed_sequence(batch['masks'], batch_first=True)[0].cuda()
+        true_mask = pad_packed_sequence(batch['masks'], batch_first=True, padding_value=label_mask_value)[0].cuda()
 
     generated_labels = model(images, lengths=lengths, get_mask=use_mask_loss, get_lstm_state=False)
     if use_mask_loss:
@@ -365,7 +365,7 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
     # indices = end_indices.view(-1, 1)
     # labels = labels.gather(1, indices).squeeze(1)
 
-    loss = criterion(generated_labels, labels)
+    loss = criterion(generated_labels, labels_masked)
     if use_mask_loss:
         loss += criterion(mask, true_mask)
     loss /= grad_accum_steps
