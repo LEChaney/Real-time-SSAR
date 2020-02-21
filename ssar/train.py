@@ -31,7 +31,7 @@ default_acc_bin_idx = 8
 restore_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
-learning_rate = 1e-2
+learning_rate = 1e-3
 dropout = 0.0
 early_stoppping_patience = 50 # Number of epochs that validation accuracy doesn't improve before stopping
 # Control variables for multiscale random crop transform used during training
@@ -42,6 +42,8 @@ scale_step = 0.84089641525
 # Positions at which to measure / display accuracy
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
+label_mask_value = -100
+frame_start_loss_calc = 2
 
 # Used to quickly switch model between modes for training and validation
 def set_train_mode(model, train=True):
@@ -149,7 +151,7 @@ def main():
 
 
     # Setup optimizer and loss
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=label_mask_value)
     criterion = criterion.cuda()
     if mode == 'training':
         set_train_mode(model, train=True) # Need this here so the optimizer has the correct parameters to be trained
@@ -346,7 +348,9 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
     images = batch['images']
 
     images = images.cuda()
-    labels = pad_packed_sequence(batch['label'], batch_first=True)[0].cuda()
+    labels = pad_packed_sequence(batch['label'], batch_first=True, padding_value=label_mask_value)[0].cuda()
+    start_mask = (torch.ones([labels.shape[0], frame_start_loss_calc]).long() * label_mask_value).cuda()
+    labels = torch.cat([start_mask, labels[:, frame_start_loss_calc:]], dim=1)
     lengths = batch['length'].cuda()
     if use_mask_loss:
         true_mask = pad_packed_sequence(batch['masks'], batch_first=True)[0].cuda()
