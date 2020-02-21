@@ -28,14 +28,14 @@ use_mask_loss = (training_mode == 'end-to-end') # Should be True for end-to-end 
 batch_size = 25
 epochs = 1000
 default_acc_bin_idx = 8
-load_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
+restore_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
 accuracy_bins = 10
 grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
-learning_rate = 1e-3
-dropout = 0.2
+learning_rate = 1e-2
+dropout = 0.0
 early_stoppping_patience = 50 # Number of epochs that validation accuracy doesn't improve before stopping
 # Control variables for multiscale random crop transform used during training
-do_data_augmentation = False
+do_data_augmentation = True
 initial_scale = 1
 n_scales = 5
 scale_step = 0.84089641525
@@ -93,7 +93,7 @@ def main():
     image_transform_test  = Compose([transforms.Resize((126, 224)),
                                      transforms.ToTensor(),
                                      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    mask_transform = transforms.Compose([train_spatial_transforms, transforms.ToTensor()])
+    mask_transform        = Compose([train_spatial_transforms, transforms.ToTensor()])
     if not do_data_augmentation:
         image_transform_train = image_transform_val
 
@@ -159,7 +159,7 @@ def main():
 
     # Continue from previous training checkpoint
     epoch_resume, step_resume, best_val_loss = load_latest(model, results_path, training_mode, optimizer)
-    if not load_training_variables:
+    if not restore_training_variables:
         epoch_resume = 0
         step_resume = 0
         best_val_loss = np.inf

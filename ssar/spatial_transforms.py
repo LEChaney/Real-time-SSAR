@@ -44,7 +44,6 @@ class Compose(object):
 class MultiScaleRandomCrop(object):
 
     def __init__(self, scales, size, interpolation=Image.BILINEAR):
-        self.state = threading.local()
         self.scales = scales
         self.size = size
         self.interpolation = interpolation
@@ -53,11 +52,11 @@ class MultiScaleRandomCrop(object):
         image_width = img.size[0]
         image_height = img.size[1]
 
-        crop_size_x = int(image_width * self.state.scale)
-        crop_size_y = int(image_height * self.state.scale)
+        crop_size_x = int(image_width * self.scale)
+        crop_size_y = int(image_height * self.scale)
 
-        x1 = self.state.tl_x * (image_width - crop_size_x)
-        y1 = self.state.tl_y * (image_height - crop_size_y)
+        x1 = self.tl_x * (image_width - crop_size_x)
+        y1 = self.tl_y * (image_height - crop_size_y)
         x2 = x1 + crop_size_x
         y2 = y1 + crop_size_y
 
@@ -66,14 +65,13 @@ class MultiScaleRandomCrop(object):
         return img.resize((self.size[1], self.size[0]), self.interpolation) # Match torch's / torchvisions (h, w) convention
 
     def randomize_parameters(self):
-        self.state.scale = self.scales[random.randint(0, len(self.scales) - 1)]
-        self.state.tl_x = random.random()
-        self.state.tl_y = random.random()
+        self.scale = self.scales[random.randint(0, len(self.scales) - 1)]
+        self.tl_x = random.random()
+        self.tl_y = random.random()
 
 class SpatialElasticDisplacement(object):
 
     def __init__(self, sigma=2.0, alpha=1.0, order=0, cval=0, mode="constant"):
-        self.state = threading.local()
         self.alpha = alpha
         self.sigma = sigma
         self.order = order
@@ -81,7 +79,7 @@ class SpatialElasticDisplacement(object):
         self.mode = mode
 
     def __call__(self, img):
-        if self.state.p < 0.50:
+        if self.p < 0.50:
             is_L = False
             is_PIL = isinstance(img, Image.Image)
             
@@ -137,4 +135,4 @@ class SpatialElasticDisplacement(object):
         return result
 
     def randomize_parameters(self):
-       self.state.p = random.random()
+       self.p = random.random()
