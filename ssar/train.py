@@ -43,7 +43,8 @@ scale_step = 0.84089641525
 rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
 label_mask_value = -100
-frame_start_loss_calc = 2
+frame_start_loss_calc = 1
+num_workers = 8
 
 # Used to quickly switch model between modes for training and validation
 def set_train_mode(model, train=True):
@@ -127,7 +128,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=batch_size,
-        num_workers=8,
+        num_workers=num_workers,
         pin_memory=True,
         shuffle=True,
         collate_fn=collate_fn_padd)
@@ -135,7 +136,7 @@ def main():
         val_loader = torch.utils.data.DataLoader(
             val_dataset,
             batch_size=batch_size,
-            num_workers=8,
+            num_workers=num_workers,
             pin_memory=True,
             shuffle=True,
             collate_fn=collate_fn_padd)
@@ -402,7 +403,21 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
         # except:
         #     im_plt = plt.imshow(images[0, lengths[0] // 2].permute(1, 2, 0).cpu())
         # plt.draw()
-        # plt.pause(0.0001)
+        # plt.pause(0.5)
+
+        # mask = torch.softmax(mask, dim=1)[:, 1, ::]
+        # try:
+        #     im_plt.set_data(mask[0, lengths[0] // 2].cpu())
+        # except:
+        #     im_plt = plt.imshow(mask[0, lengths[0] // 2].cpu())
+        # plt.draw()
+        # plt.pause(0.5)
+        # im_plt.set_data(true_mask[0, lengths[0] // 2].cpu())
+        # plt.draw()
+        # plt.pause(0.5)
+        # im_plt.set_data(mask[0, (lengths[0] * 0.75).long()].cpu())
+        # plt.draw()
+        # plt.pause(0.5)
 
         return loss.item() * grad_accum_steps, correct_count_hist # Return undivided loss
 

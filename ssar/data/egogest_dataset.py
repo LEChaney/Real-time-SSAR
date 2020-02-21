@@ -221,7 +221,7 @@ class EgoGestDataSequence(Dataset):
                 if self.mask_transform:
                     mask = self.mask_transform(mask)
                     mask = torch.squeeze(mask)
-                mask = mask.long()
+                mask = (mask > 0.5).long() # Threshold again in case we did some deformation that left greyscale values
                 masks[i, :, :] = mask
                 
         label = torch.tensor([gesture[0]]).repeat([num_images])
