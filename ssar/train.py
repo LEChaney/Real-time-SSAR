@@ -23,14 +23,14 @@ import os
 
 results_path = 'results'
 mode = 'training' # Should be one of ['training', 'validation', 'testing']
-training_mode = 'lstm-only' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
+training_mode = 'end-to-end' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
 use_mask_loss = (training_mode == 'end-to-end') # Should be True for end-to-end or embedding training
-batch_size = 25
+batch_size = 8
 epochs = 1000
 default_acc_bin_idx = 8
-restore_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
+restore_training_variables = False # Whether to load that last epoch, training step and best validation score to resume training from
 accuracy_bins = 10
-grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
+grad_accum_steps = 1 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
 dropout = 0.0
 early_stoppping_patience = 50 # Number of epochs that validation accuracy doesn't improve before stopping
