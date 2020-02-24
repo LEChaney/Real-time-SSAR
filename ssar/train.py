@@ -23,19 +23,19 @@ import os
 
 results_path = 'results'
 mode = 'training' # Should be one of ['training', 'validation', 'testing']
-training_mode = 'end-to-end' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
+training_mode = 'lstm-only' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
 use_mask_loss = (training_mode == 'end-to-end') # Should be True for end-to-end or embedding training
-batch_size = 8
+batch_size = 25
+grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 epochs = 1000
 default_acc_bin_idx = 8
-restore_training_variables = False # Whether to load that last epoch, training step and best validation score to resume training from
+restore_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
 accuracy_bins = 10
-grad_accum_steps = 1 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
 dropout = 0.0
 early_stoppping_patience = 50 # Number of epochs that validation accuracy doesn't improve before stopping
 # Control variables for multiscale random crop transform used during training
-do_data_augmentation = True
+do_data_augmentation = False
 initial_scale = 1
 n_scales = 5
 scale_step = 0.84089641525
@@ -44,7 +44,8 @@ rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
 label_mask_value = -100
 frame_start_loss_calc = 1
-num_workers = 8
+lstm_pred_every = 8 # Only calculate loss every nth frame (This enables the network to do multi-step computation before making a prediction)
+num_workers = 7
 
 # Used to quickly switch model between modes for training and validation
 def set_train_mode(model, train=True):
@@ -349,10 +350,13 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
     images = batch['images']
 
     images = images.cuda()
+    lengths = batch['length'].cuda()
     labels = pad_packed_sequence(batch['label'], batch_first=True, padding_value=label_mask_value)[0].cuda()
+
     start_label_mask = (torch.ones([labels.shape[0], frame_start_loss_calc]).long() * label_mask_value).cuda()
     labels_masked = torch.cat([start_label_mask, labels[:, frame_start_loss_calc:]], dim=1)
-    lengths = batch['length'].cuda()
+    labels_masked[:, np.mod(np.arange(labels_masked.shape[1]),lstm_pred_every)!=0] = label_mask_value
+
     if use_mask_loss:
         true_mask = pad_packed_sequence(batch['masks'], batch_first=True, padding_value=label_mask_value)[0].cuda()
 
@@ -360,11 +364,11 @@ def process_batch(model, step, batch, criterion, optimizer, mode='training'):
     if use_mask_loss:
         mask, generated_labels = generated_labels
 
-    # end_indices = (lengths - 1)
+    # end_indices = (torch.rand([lengths.shape[0]]).cuda() * lengths).long()
     # indices = end_indices.view(-1, 1, 1).repeat(1, generated_labels.shape[1], 1)
-    # generated_labels = generated_labels.gather(2, indices).squeeze(2)
+    # generated_label = generated_labels.gather(2, indices).squeeze(2)
     # indices = end_indices.view(-1, 1)
-    # labels = labels.gather(1, indices).squeeze(1)
+    # label = labels.gather(1, indices).squeeze(1)
 
     loss = criterion(generated_labels, labels_masked)
     if use_mask_loss:
