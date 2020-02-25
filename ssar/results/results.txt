@@ -1,0 +1,2 @@
+Validation - Step: 190, Processed Gestures: 4750, Correct Count (@t=0.89): 3996, Accuracy (@t=0.89): 0.8413, Loss Epoch: 2.75046, Loss Last Batch: 2.54007
+NOTE: Loss calculation since changed.

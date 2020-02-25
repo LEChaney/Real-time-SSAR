@@ -1,0 +1,1 @@
+Epoch 234: Validation Step: 190, Processed Gestures: 4750, Correct Count (@t=0.89): 3932, Accuracy (@t=0.89): 0.8278, Loss Epoch: 0.97941, Loss Last Batch: 0.65838
