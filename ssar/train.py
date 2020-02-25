@@ -23,19 +23,19 @@ import os
 
 results_path = 'results'
 mode = 'training' # Should be one of ['training', 'validation', 'testing']
-training_mode = 'end-to-end' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
+training_mode = 'lstm-only' # Should be one of ['end-to-end', 'lstm-only'], only applies in 'training' mode
 use_mask_loss = (training_mode == 'end-to-end') # Should be True for end-to-end or embedding training
-batch_size = 8
+batch_size = 25
 epochs = 1000
 default_acc_bin_idx = 8
-restore_training_variables = False # Whether to load that last epoch, training step and best validation score to resume training from
+restore_training_variables = True # Whether to load that last epoch, training step and best validation score to resume training from
 accuracy_bins = 10
-grad_accum_steps = 1 # Effective training batch size is equal batch_size x grad_accum_steps
+grad_accum_steps = 4 # Effective training batch size is equal batch_size x grad_accum_steps
 learning_rate = 1e-3
-dropout = 0.0
+dropout = 0.2
 early_stoppping_patience = 50 # Number of epochs that validation accuracy doesn't improve before stopping
 # Control variables for multiscale random crop transform used during training
-do_data_augmentation = True
+do_data_augmentation = False
 initial_scale = 1
 n_scales = 5
 scale_step = 0.84089641525
@@ -44,7 +44,7 @@ rel_poses = torch.linspace(0, 1, accuracy_bins, requires_grad=False)
 rel_poses_gpu = rel_poses.cuda()
 label_mask_value = -100
 frame_start_loss_calc = 1
-num_workers = 8
+num_workers = 7
 
 # Used to quickly switch model between modes for training and validation
 def set_train_mode(model, train=True):
