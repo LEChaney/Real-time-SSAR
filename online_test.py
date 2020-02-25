@@ -496,6 +496,6 @@ def main(clf_threshold_pre):
     plt.draw()
 
 if __name__ == '__main__':
-    for clf_threshold_pre in np.linspace(0.2, 1.0, 9):
+    for clf_threshold_pre in [0.6, 0.4, 0.2]:
         main(clf_threshold_pre)
     plt.show()
