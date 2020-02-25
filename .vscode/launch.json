@@ -5,6 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "test_avg_early",
+            "type": "python",
+            "request": "launch",
+            "program": "test_avg_early.py",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Train SSAR",
             "type": "python",
             "request": "launch",

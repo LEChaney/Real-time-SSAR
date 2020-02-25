@@ -22,13 +22,19 @@ from temporal_transforms import *
 from torchvision import transforms
 from target_transforms import ClassLabel
 from dataset import get_online_data 
-from utils import Logger, AverageMeter, LevenshteinDistance, Queue
+from utils import Logger, AverageMeter, LevenshteinDistancePlusAvgFramesEarly, Queue
 
 import pdb
 import numpy as np
 
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import figure
+
+early_x_data = []
+early_y_data = []
+early_plot, = plt.plot([], [], 'bs-')
+plt.xlabel('Early-detection threshold')
+plt.ylabel('Average early detection time (frames)')
 
 
 def weighting_func(x):
@@ -136,7 +142,9 @@ def load_models(opt):
 
     return detector, classifier
 
-def main():
+def main(clf_threshold_pre):
+    print(f'Early-detection threshold: {clf_threshold_pre}')
+
     opt = parse_opts_online()
 
     detector,classifier = load_models(opt)
@@ -204,6 +212,7 @@ def main():
     classifier.eval()
 
     levenshtein_accuracies = AverageMeter()
+    frames_early_meter = AverageMeter()
     videoidx = 0
     for path in test_paths[4:]:
         path = os.path.normpath(path)
@@ -357,7 +366,7 @@ def main():
                 cum_sum_unweighted = ((cum_sum_unweighted * (active_index-1)) + (1.0 * clf_selected_queue))/active_index #Not Weighting Aproach 
 
                 best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
-                if float(cum_sum[best1]- cum_sum[best2]) > opt.clf_threshold_pre:
+                if float(cum_sum[best1]- cum_sum[best2]) > clf_threshold_pre:
                     finished_prediction = True
                     pre_predict = True
 
@@ -385,8 +394,8 @@ def main():
             #     im_plt = ax[0].imshow(img)
             # else:
             #     im_plt.set_data(img)
-            # plt.draw()
-            # plt.pause(0.001)
+            plt.draw()
+            plt.pause(0.001)
 
             if active == False and  prev_active == True:
                 finished_prediction = True
@@ -396,25 +405,26 @@ def main():
 
 
             if finished_prediction == True:
+                detection_frame = (i * opt.stride_len) + opt.sample_duration_clf
                 best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
                 if pre_predict == True:  
                     if best1 != prev_best1:
                         if cum_sum[best1]>opt.clf_threshold_final:  
-                            results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
-                            print( 'Early Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))                      
+                            results.append((detection_frame,best1))
+                            print( 'Early Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], detection_frame))                      
                 else:
                     # raw_best = clf_selected_queue.argsort()[-1]
-                    # results.append(((i*opt.stride_len)+opt.sample_duration_clf,raw_best))
-                    # print( 'Late Detected - class : {} with prob : {} at frame {}'.format(raw_best, clf_selected_queue[raw_best], (i*opt.stride_len)+opt.sample_duration_clf))
+                    # results.append((detection_frame,raw_best))
+                    # print( 'Late Detected - class : {} with prob : {} at frame {}'.format(raw_best, clf_selected_queue[raw_best], detection_frame))
                     if cum_sum[best1]>opt.clf_threshold_final:
                         if best1 == prev_best1:
                             if cum_sum[best1]>5:
-                                results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
-                                print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
+                                results.append((detection_frame,best1))
+                                print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], detection_frame))
                         else:
-                            results.append(((i*opt.stride_len)+opt.sample_duration_clf,best1))
+                            results.append((detection_frame,best1))
                             
-                            print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], (i*opt.stride_len)+opt.sample_duration_clf))
+                            print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], detection_frame))
 
                     prev_best1 = best1
                     finished_prediction = False
@@ -438,10 +448,12 @@ def main():
                                     opt.whole_path.rsplit(os.sep, 2)[0],
                                     'Group'+opt.whole_path.rsplit('.', 1)[0][-1] + '.csv').replace('Subject', 'subject')
             true_classes = []
+            end_frames = []
             with open(target_csv_path) as csvfile:
                 readCSV = csv.reader(csvfile, delimiter=',')
                 for row in readCSV:
                     true_classes.append(int(row[0])-1)
+                    end_frames.append(int(row[2]))
         elif opt.dataset == 'nv':
             true_classes = []
             with open('./annotation_nvGesture/vallistall.txt') as csvfile:
@@ -452,23 +464,38 @@ def main():
                             true_classes.append(int(row[1])-1)
         
         predicted = np.array(results)[:,1]
+        detection_frames = np.array(results)[:,0]
         
         true_classes = np.array(true_classes)
-        levenshtein_distance = LevenshteinDistance(true_classes, predicted)
+        levenshtein_distance, avg_frames_early = LevenshteinDistancePlusAvgFramesEarly(true_classes, predicted, end_frames, detection_frames)
         levenshtein_accuracy = 1-(levenshtein_distance/len(true_classes))
         if levenshtein_distance <0: # Distance cannot be less than 0
             levenshtein_accuracies.update(0, len(true_classes))
         else:
             levenshtein_accuracies.update(levenshtein_accuracy, len(true_classes))
+        frames_early_meter.update(avg_frames_early)
 
         
         print('predicted classes: \t',predicted)
         print('True classes :\t\t',true_classes)
         print('Levenshtein Accuracy = {} ({})'.format(levenshtein_accuracies.val, levenshtein_accuracies.avg))
+        print(f'Average frames early = {frames_early_meter.val} ({frames_early_meter.avg})')
         
     print('Average Levenshtein Accuracy= {}'.format(levenshtein_accuracies.avg))
 
     print('-----Evaluation is finished------')
 
+    early_x_data.append(clf_threshold_pre)
+    early_y_data.append(frames_early_meter.avg)
+    early_plot.set_xdata(early_x_data)
+    early_plot.set_ydata(early_y_data)
+    plt.annotate(f'{levenshtein_accuracies.avg * 100:.2f}', (clf_threshold_pre, frames_early_meter.avg), textcoords='offset pixels', xytext=(10, 10))
+    plt.gca().relim()
+    plt.gca().autoscale_view()
+    plt.pause(0.0001)
+    plt.draw()
+
 if __name__ == '__main__':
-    main()
+    for clf_threshold_pre in np.linspace(0.2, 1.0, 9):
+        main(clf_threshold_pre)
+    plt.show()

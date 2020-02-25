@@ -117,6 +117,55 @@ def LevenshteinDistance(a,b):
     return current[n]
 
 
+def LevenshteinDistancePlusAvgFramesEarly(a,b,true_end_frames,detection_frames):
+    # This is a straightforward implementation of a well-known algorithm, and thus
+    # probably shouldn't be covered by copyright to begin with. But in case it is,
+    # the author (Magnus Lie Hetland) has, to the extent possible under law,
+    # dedicated all copyright and related and neighboring rights to this software
+    # to the public domain worldwide, by distributing it under the CC0 license,
+    # version 1.0. This software is distributed without any warranty. For more
+    # information, see <http://creativecommons.org/publicdomain/zero/1.0>
+    "Calculates the Levenshtein distance between a and b."
+    n, m = len(a), len(b)
+    if n > m:
+        # Make sure n <= m, to use O(min(n,m)) space
+        a,b = b,a
+        n,m = m,n
+        true_end_frames, detection_frames = [-x for x in detection_frames], [-x for x in true_end_frames]
+        
+    current = range(n+1)
+    cur_frames_early = [0]*(n+1)
+    cur_matches = [0]*(n+1)
+    for i in range(1,m+1):
+        previous, current = current, [i]+[0]*n
+        prev_frames_early, cur_frames_early = cur_frames_early, [0]*(n+1)
+        prev_matches, cur_matches = cur_matches, [0]*(n+1)
+        for j in range(1,n+1):
+            add, delete = previous[j]+1, current[j-1]+1
+            change = previous[j-1]
+            if a[j-1] != b[i-1]:
+                change = change + 1
+            current[j] = min(add, delete, change)
+            
+            cur_frames_early[j] = -np.inf
+            if current[j] == add:
+                cur_frames_early[j] = max(cur_frames_early[j], prev_frames_early[j])
+                cur_matches[j] = prev_matches[j]
+            if current[j] == delete:
+                cur_frames_early[j] = max(cur_frames_early[j], cur_frames_early[j-1])
+                cur_matches[j] = cur_matches[j-1]
+            if current[j] == change:
+                delta = true_end_frames[j-1] - detection_frames[i-1]
+                frames_early = prev_frames_early[j-1] + delta
+                cur_frames_early[j] = max(cur_frames_early[j], frames_early)
+                if cur_frames_early[j] == frames_early:
+                    cur_matches[j] = prev_matches[j-1] + 1
+                
+            
+    avg_frames_early = cur_frames_early[n] / cur_matches[n]
+    return current[n], avg_frames_early
+
+
 def load_value_file(file_path):
     with open(file_path, 'r') as input_file:
         value = float(input_file.read().rstrip('\n\r'))
