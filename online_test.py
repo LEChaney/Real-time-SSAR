@@ -394,8 +394,9 @@ def main(clf_threshold_pre):
             #     im_plt = ax[0].imshow(img)
             # else:
             #     im_plt.set_data(img)
-            # plt.draw()
-            # plt.pause(0.001)
+            if i % 10 == 0:
+                plt.draw()
+                plt.pause(0.001)
 
             if active == False and  prev_active == True:
                 finished_prediction = True
