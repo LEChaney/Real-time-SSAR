@@ -408,24 +408,25 @@ def main(clf_threshold_pre):
             if finished_prediction == True:
                 detection_frame = (i * opt.stride_len) + opt.sample_duration_clf
                 best2, best1 = tuple(cum_sum.argsort()[-2:][::1])
-                if pre_predict == True:  
-                    if best1 != prev_best1:
-                        if cum_sum[best1]>opt.clf_threshold_final:  
-                            results.append((detection_frame,best1))
-                            print( 'Early Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], detection_frame))                      
-                else:
-                    # raw_best = clf_selected_queue.argsort()[-1]
-                    # results.append((detection_frame,raw_best))
-                    # print( 'Late Detected - class : {} with prob : {} at frame {}'.format(raw_best, clf_selected_queue[raw_best], detection_frame))
-                    if cum_sum[best1]>opt.clf_threshold_final:
-                        if best1 == prev_best1:
-                            if cum_sum[best1]>5:
+                if cum_sum[best1]>opt.clf_threshold_final:
+                    if pre_predict == True:  
+                        if best1 != prev_best1:
+                            if cum_sum[best1]>opt.clf_threshold_final:  
                                 results.append((detection_frame,best1))
+                                print( 'Early Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], detection_frame))                      
+                    else:
+                        # raw_best = clf_selected_queue.argsort()[-1]
+                        # results.append((detection_frame,raw_best))
+                        # print( 'Late Detected - class : {} with prob : {} at frame {}'.format(raw_best, clf_selected_queue[raw_best], detection_frame))
+                        if cum_sum[best1]>opt.clf_threshold_final:
+                            if best1 == prev_best1:
+                                if cum_sum[best1]>5:
+                                    results.append((detection_frame,best1))
+                                    print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], detection_frame))
+                            else:
+                                results.append((detection_frame,best1))
+                                
                                 print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], detection_frame))
-                        else:
-                            results.append((detection_frame,best1))
-                            
-                            print( 'Late Detected - class : {} with prob : {} at frame {}'.format(best1, cum_sum[best1], detection_frame))
 
                     prev_best1 = best1
                     finished_prediction = False
